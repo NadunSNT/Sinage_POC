@@ -38,7 +38,7 @@
     showAdNameAlways: typeof configuredSettings.showAdNameAlways === "boolean" ? configuredSettings.showAdNameAlways : false,
     cacheVideosBeforePlayback: playbackMode === "cache-first",
     cacheVideosInBackground: playbackMode === "stream",
-    streamStartupDelaySeconds: typeof configuredSettings.streamStartupDelaySeconds === "number" && Number.isFinite(configuredSettings.streamStartupDelaySeconds) ? Math.max(0, Math.min(30, configuredSettings.streamStartupDelaySeconds)) : 3,
+    streamStartupDelaySeconds: typeof configuredSettings.streamStartupDelaySeconds === "number" && Number.isFinite(configuredSettings.streamStartupDelaySeconds) ? Math.max(0, configuredSettings.streamStartupDelaySeconds) : 3,
     videoCacheVersion: typeof configuredSettings.videoCacheVersion === "string" && configuredSettings.videoCacheVersion.trim() ? configuredSettings.videoCacheVersion.trim() : "1"
   };
   var playlist = [];

@@ -519,6 +519,23 @@ test('a warm visit plays the cached first video without the startup interval', a
   assert.equal(app.playCalls,1);
 });
 
+test('startup countdown honors configured delays above thirty seconds', () => {
+  for (const seconds of [60,120]) {
+    const app=setup({settings:{playbackMode:'stream',streamStartupDelaySeconds:seconds},mediaCache:{create:()=>({
+      getSource:async()=>null,prepare:()=>new Promise(()=>{})
+    })}});
+    assert.match(app.elements['cache-progress-label'].textContent,new RegExp(seconds+' seconds'));
+    app.tick(30000);
+    assert.equal(app.state,'initializing');
+    assert.equal(app.playCalls,0);
+    app.tick(seconds*1000-30001);
+    assert.equal(app.playCalls,0);
+    app.tick(1);
+    assert.equal(app.playCalls,1);
+    assert.equal(app.video.src,'assets/videos/one.mp4');
+  }
+});
+
 test('background cache completion never restarts active streaming and later clips use local copies', async () => {
   let finish;
   let cached=false;

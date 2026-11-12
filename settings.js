@@ -8,6 +8,6 @@ window.SIGNAGE_SETTINGS = {
   showPlayerControlsButton: false, // Show the floating button when controls are hidden
   showAdNameAlways: true,      // Keep the current ad name visible during playback
   playbackMode: "stream", // "stream" = stream + background cache; "cache-first" = cache all, then play
-  streamStartupDelaySeconds: 60, // Brief initialization screen before the first stream
+  streamStartupDelaySeconds: 60, // Initial stream countdown in seconds; 0 skips it
   videoCacheVersion: "1"        // Change this when replacing a video without renaming it
 };
