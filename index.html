@@ -10,11 +10,16 @@
   <link rel="stylesheet" href="./styles.css">
   <script src="./settings.js" defer></script>
   <script src="./playlist.js" defer></script>
+  <script src="./media-cache.js" defer></script>
   <script src="./app.js" defer></script>
 </head>
 <body>
   <main id="player" class="player controls-visible" aria-label="Digital signage player">
     <video id="video" autoplay playsinline preload="auto" tabindex="0" aria-label="Signage video"></video>
+    <div id="initialization-screen" class="initialization-screen" aria-hidden="true" hidden>
+      <div class="signal-bars"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+      <div class="signal-footer"></div>
+    </div>
 
     <header class="masthead chrome">
       <div class="brand"><span class="brand-mark" aria-hidden="true">s<span>.</span></span><span>SIGNAGE<span class="brand-detail">WEB PLAYER / POC</span></span></div>
@@ -26,11 +31,20 @@
         <svg viewBox="0 0 100 100" focusable="false"><path d="M 41 32 L 67 50 L 41 68 Z" /></svg>
       </div>
       <div class="status-content">
+        <div id="initialization-brand" class="brand initialization-brand" hidden><span class="brand-mark" aria-hidden="true">s<span>.</span></span><span>SIGNAGE<span class="brand-detail">WEB PLAYER / POC</span></span></div>
         <p class="eyebrow">YOUR SCREEN, IN MOTION</p>
         <h1 id="status-title">Getting ready.</h1>
         <p id="status-message" class="status-message" role="status" aria-live="polite">Loading your playlist and startup preferences.</p>
         <div id="loading-indicator" class="loading-indicator" aria-hidden="true"><span></span><span></span><span></span></div>
+        <div id="initialization-progress" class="initialization-progress" hidden>
+          <progress id="cache-progress" max="100" value="0" aria-label="Stream initialization progress"></progress>
+          <p id="cache-progress-label" class="cache-progress-label" role="status" aria-live="polite">Preparing your playlist…</p>
+        </div>
         <button id="start-button" class="button primary" type="button">Start playback <span aria-hidden="true">▶</span></button>
+        <div id="initialization-actions" class="initialization-actions" hidden>
+          <button id="cache-retry-button" class="button primary" type="button">Retry initialization</button>
+          <button id="stream-without-cache" class="button" type="button">Play without preparation</button>
+        </div>
         <p id="setup-note" class="setup-note" hidden>Add your MP4 files to <code>assets/videos/</code> and update <code>playlist.js</code>, then retry.</p>
       </div>
     </section>
@@ -44,6 +58,7 @@
         <dt>Time / duration</dt><dd id="diag-time">—</dd>
         <dt>Media readiness</dt><dd id="diag-ready">—</dd>
         <dt>Sound</dt><dd id="diag-sound">Muted</dd>
+        <dt>Video source</dt><dd id="diag-cache">Not initialized</dd>
         <dt>Latest error</dt><dd id="diag-error">None</dd>
       </dl>
     </aside>

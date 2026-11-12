@@ -15,7 +15,7 @@ function setup(options = {}) {
   let nextId = 0;
   let playCalls = 0;
   const tasks = new Map();
-  const document = { activeElement: { tagName: 'BODY' }, hidden: false, listeners: {} };
+  const document = { activeElement: { tagName: 'BODY' }, hidden: false, listeners: {}, baseURI: 'https://example.test/signage-poc/index.html' };
   const elements = {};
   function listen(type, callback) { (this.listeners[type] ||= []).push(callback); }
   function fire(type, values = {}) {
@@ -32,7 +32,7 @@ function setup(options = {}) {
       setAttribute(name, value) { this.attrs[name] = value; },
       getAttribute(name) { return name === 'src' ? this.src : this.attrs[name]; },
       focus() { document.activeElement = this; }, click() { this.fire('click'); },
-      getClientRects() { return this.hidden || (id === 'start-button' && elements['status-panel'].hidden) || (id === 'close-diagnostics' && elements.diagnostics.hidden) ? [] : [{}]; }
+      getClientRects() { return this.hidden || (id === 'start-button' && elements['status-panel'].hidden) || (id === 'close-diagnostics' && elements.diagnostics.hidden) || ((id === 'cache-retry-button' || id === 'stream-without-cache') && elements['initialization-actions'].hidden) ? [] : [{}]; }
     };
   }
   for (const match of html.matchAll(/<([a-z0-9-]+)\b([^>]*\bid="([^"]+)"[^>]*)>/gi)) {
@@ -62,13 +62,19 @@ function setup(options = {}) {
     return id;
   }
   const context = vm.createContext({
-    document, window: { SIGNAGE_PLAYLIST: Object.hasOwn(options, 'playlist') ? options.playlist : [{ title: 'One', src: 'assets/videos/one.mp4' }, { title: 'Two', src: 'assets/videos/two.mp4' }] },
+    document, window: { SignageMediaCache: options.mediaCache, SIGNAGE_PLAYLIST: Object.hasOwn(options, 'playlist') ? options.playlist : [{ title: 'One', src: 'assets/videos/one.mp4' }, { title: 'Two', src: 'assets/videos/two.mp4' }] },
     Date: class extends Date { static now() { return time; } },
     setTimeout: (cb, ms) => schedule(cb, ms), clearTimeout: id => tasks.delete(id),
     setInterval: (cb, ms) => schedule(cb, ms, true), console
   });
   vm.runInContext(settingsSource, context);
-  if (Object.hasOwn(options, 'settings')) context.window.SIGNAGE_SETTINGS = options.settings;
+  // Isolate controller tests from the user's editable preferences. Cache-specific
+  // tests enable preparation explicitly; other tests exercise direct playback.
+  context.window.SIGNAGE_SETTINGS = Object.assign({
+    startMuted: false, fullscreenOnStart: true, hideControlsOnStart: true,
+    showLogoAlways: true, showPlayerControlsButton: false, showAdNameAlways: false,
+    cacheVideosBeforePlayback: false
+  }, options.settings);
   vm.runInContext(source, context);
   return {
     elements, document, video, progress,
@@ -301,14 +307,13 @@ test('missing or malformed settings use sound-on and fullscreen-on defaults', ()
   }
 });
 
-test('hidden controls ignore pointer and background events and reveal on any key', () => {
+test('hidden controls ignore pointer movement and background events and reveal on any key', () => {
   for (const key of ['x', 'Shift', 'Tab', 'Escape', 'Enter', 'ArrowRight']) {
     const app = setup();
     assert.equal(app.elements.player.classList.contains('controls-visible'), false);
     app.playing();
     app.elements.player.fire('mousemove');
     app.elements.player.fire('touchstart');
-    app.video.fire('click');
     app.document.fire('visibilitychange');
     app.document.fire('fullscreenchange');
     app.video.fire('waiting');
@@ -335,13 +340,23 @@ test('manual hiding closes diagnostics, moves focus, and survives video transiti
   assert.equal(app.elements.player.classList.contains('controls-visible'), false);
 });
 
-test('initially visible controls retain auto-hide without pointer reveal afterward', () => {
+test('controls auto-hide and reveal on player clicks while ignoring mouse movement', () => {
   const app = setup({ settings: { hideControlsOnStart: false } });
   assert.equal(app.elements.player.classList.contains('controls-visible'), true);
   app.playing(); app.tick(4500);
   assert.equal(app.elements.player.classList.contains('controls-visible'), false);
   app.elements.player.fire('mousemove');
   assert.equal(app.elements.player.classList.contains('controls-visible'), false);
+  app.elements.player.fire('click', { target: app.video });
+  assert.equal(app.elements.player.classList.contains('controls-visible'), true);
+  assert.equal(app.state, 'playing');
+  app.elements['hide-controls'].click();
+  app.elements.player.fire('click', { target: app.elements['hide-controls'] });
+  assert.equal(app.elements.player.classList.contains('controls-visible'), false);
+  app.elements.player.fire('click', { target: { tagName: 'SPAN', parentElement: app.elements['hide-controls'] } });
+  assert.equal(app.elements.player.classList.contains('controls-visible'), false);
+  app.elements.player.fire('click');
+  assert.equal(app.elements.player.classList.contains('controls-visible'), true);
 });
 
 test('logo and floating controls button settings can be toggled during playback', () => {
@@ -378,4 +393,93 @@ test('persistent ad name follows the configured preference and current video', (
   assert.equal(app.elements['persistent-ad-name'].textContent, 'Two');
   assert.equal(app.elements['persistent-ad-name'].hidden, false);
   assert.equal(setup().elements['persistent-ad-name'].hidden, true);
+});
+
+test('cache mode shows the TV initialization screen and waits for the whole playlist', async () => {
+  let finish;
+  let report;
+  let sourceRequests = 0;
+  const app = setup({ settings:{cacheVideosBeforePlayback:true},mediaCache:{create:()=>({
+    prepare:(_,progress)=>{report=progress;return new Promise(resolve=>{finish=resolve;});},
+    getSource:async()=>{sourceRequests++;return {url:'blob:one',release(){}};}
+  })}});
+  assert.equal(app.state,'initializing');
+  assert.equal(app.playCalls,0);
+  assert.equal(app.elements['initialization-screen'].hidden,false);
+  assert.equal(app.elements['initialization-brand'].hidden,false);
+  assert.equal(app.elements['start-button'].hidden,true);
+  assert.equal(app.elements['next-button'].disabled,true);
+  report({completed:0,total:2,title:'One',loaded:5,totalBytes:10});
+  assert.equal(app.elements['cache-progress'].attrs.value,'25');
+  assert.match(app.elements['status-title'].textContent,/Initializing stream/);
+  app.tick(120000);
+  assert.equal(app.state,'initializing','playback watchdog must not interrupt initialization');
+  app.video.error={code:4};app.video.fire('error');
+  assert.equal(app.state,'initializing','old video errors must not interrupt initialization');
+  app.elements['start-button'].click();
+  assert.equal(sourceRequests,0);
+  finish(); await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(app.video.src,'blob:one');
+  assert.equal(app.playCalls,1);
+  assert.equal(app.elements['initialization-screen'].hidden,true);
+});
+
+test('cache preparation failure is bounded, retryable, and never silently streams', async () => {
+  let attempts=0;
+  const app = setup({settings:{cacheVideosBeforePlayback:true},mediaCache:{create:()=>({
+    prepare:()=>++attempts===1?Promise.reject(new Error('Connection lost')):Promise.resolve(),
+    getSource:async()=>({url:'blob:one',release(){}})
+  })}});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(app.state,'cache-error');
+  assert.equal(app.playCalls,0);
+  assert.equal(app.elements['initialization-actions'].hidden,false);
+  assert.equal(app.document.activeElement.id,'cache-retry-button');
+  app.tick(120000);
+  assert.equal(attempts,1);
+  app.elements['cache-retry-button'].click();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(app.video.src,'blob:one');
+  assert.equal(app.playCalls,1);
+});
+
+test('unsupported preparation offers an explicit direct-playback fallback', () => {
+  const app=setup({settings:{cacheVideosBeforePlayback:true}});
+  assert.equal(app.state,'cache-error');
+  assert.equal(app.playCalls,0);
+  app.elements['stream-without-cache'].click();
+  assert.equal(app.video.src,'assets/videos/one.mp4');
+  assert.equal(app.playCalls,1);
+  assert.match(app.elements['diag-cache'].textContent,/preparation skipped/);
+});
+
+test('local source transitions release previous and stale Blob URLs', async () => {
+  const releases=[];
+  const sources=[];
+  const app=setup({settings:{cacheVideosBeforePlayback:true},mediaCache:{create:()=>({
+    prepare:async()=>{},getSource:()=>new Promise(resolve=>sources.push(resolve))
+  })}});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(app.state,'preparing');
+  app.elements['next-button'].click();
+  sources[0]({url:'blob:stale',release:()=>releases.push('stale')});
+  sources[1]({url:'blob:two',release:()=>releases.push('two')});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(app.video.src,'blob:two');
+  assert.deepEqual(releases,['stale']);
+  app.playing();app.video.fire('ended');
+  sources[2]({url:'blob:one',release:()=>releases.push('one')});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(app.video.src,'blob:one');
+  assert.deepEqual(releases,['stale','two']);
+});
+
+test('evicted local media returns to initialization recovery instead of freezing', async () => {
+  const app=setup({settings:{cacheVideosBeforePlayback:true},mediaCache:{create:()=>({
+    prepare:async()=>{},getSource:async()=>{throw new Error('Stored video unavailable');}
+  })}});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(app.state,'cache-error');
+  assert.match(app.elements['status-message'].textContent,/Stored video unavailable/);
+  assert.equal(app.playCalls,0);
 });

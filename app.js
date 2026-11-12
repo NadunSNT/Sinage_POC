@@ -1,4 +1,4 @@
-/* Static signage player. No network services, persistence, or dependencies. */
+/* Static signage player with optional browser video storage. No dependencies. */
 (function () {
   "use strict";
 
@@ -22,7 +22,9 @@
     hideControlsOnStart: typeof configuredSettings.hideControlsOnStart === "boolean" ? configuredSettings.hideControlsOnStart : true,
     showLogoAlways: typeof configuredSettings.showLogoAlways === "boolean" ? configuredSettings.showLogoAlways : true,
     showPlayerControlsButton: typeof configuredSettings.showPlayerControlsButton === "boolean" ? configuredSettings.showPlayerControlsButton : false,
-    showAdNameAlways: typeof configuredSettings.showAdNameAlways === "boolean" ? configuredSettings.showAdNameAlways : false
+    showAdNameAlways: typeof configuredSettings.showAdNameAlways === "boolean" ? configuredSettings.showAdNameAlways : false,
+    cacheVideosBeforePlayback: typeof configuredSettings.cacheVideosBeforePlayback === "boolean" ? configuredSettings.cacheVideosBeforePlayback : true,
+    videoCacheVersion: typeof configuredSettings.videoCacheVersion === "string" && configuredSettings.videoCacheVersion.trim() ? configuredSettings.videoCacheVersion.trim() : "1"
   };
   var playlist = [];
   var state = "starting";
@@ -39,6 +41,10 @@
   var ERROR_DELAY_MS = 4000;
   var HIDE_CONTROLS_MS = 4500;
   var configError = "";
+  var mediaCache = null;
+  var cacheReady = false;
+  var cacheStatus = settings.cacheVideosBeforePlayback ? "Awaiting initialization" : "Network playback";
+  var activeSource = null;
 
   // Fail visibly on malformed configuration instead of silently dropping entries.
   if (!Array.isArray(window.SIGNAGE_PLAYLIST)) {
@@ -71,6 +77,7 @@
     byId("diag-time").textContent = formatTime(video.currentTime) + " / " + formatTime(video.duration);
     byId("diag-ready").textContent = video.readyState + " / 4 · network " + video.networkState;
     byId("diag-sound").textContent = video.muted ? "Muted" : "Sound on";
+    byId("diag-cache").textContent = cacheStatus;
     byId("diag-error").textContent = latestError || "None";
   }
 
@@ -83,15 +90,23 @@
   function setState(nextState, title, message) {
     state = nextState;
     player.dataset.state = state;
-    byId("status-label").textContent = { starting: "Starting", loading: "Loading", playing: "Playing", buffering: "Buffering", paused: "Paused", blocked: "Ready to start", error: "Needs attention", empty: "No playlist" }[state];
+    byId("status-label").textContent = { starting: "Starting", initializing: "Initializing stream", "cache-error": "Initialization paused", preparing: "Preparing playback", loading: "Loading", playing: "Playing", buffering: "Buffering", paused: "Paused", blocked: "Ready to start", error: "Needs attention", empty: "No playlist" }[state];
+    var initializationScreen = state === "initializing" || state === "cache-error";
+    byId("initialization-screen").hidden = !initializationScreen;
+    byId("initialization-brand").hidden = !initializationScreen;
+    byId("initialization-progress").hidden = !initializationScreen;
+    byId("initialization-actions").hidden = state !== "cache-error";
     panel.hidden = state === "playing";
-    byId("loading-indicator").hidden = state !== "loading" && state !== "buffering";
+    byId("loading-indicator").hidden = ["loading", "buffering", "initializing", "preparing"].indexOf(state) === -1;
     byId("setup-note").hidden = state !== "error" && state !== "empty";
     if (title) byId("status-title").textContent = title;
     if (message) byId("status-message").textContent = message;
     pauseButton.disabled = !isActive() && state !== "paused";
     pauseButton.textContent = state === "paused" ? "Resume" : "Pause";
-    startButton.disabled = !!configError;
+    startButton.hidden = initializationScreen || state === "preparing";
+    startButton.disabled = !!configError || initializationScreen || state === "preparing";
+    nextButton.disabled = !!configError || (settings.cacheVideosBeforePlayback && !cacheReady);
+    retryButton.disabled = !!configError || state === "initializing";
     if (state !== "playing") showControls();
     else scheduleHide();
     updateDiagnostics();
@@ -109,7 +124,7 @@
 
   function showControls(force) {
     // Background events, pointer movement, and programmatic focus must not
-    // reveal hidden controls. Only a key or the optional reveal button does.
+    // reveal hidden controls. A key, player click, or reveal button can do so.
     if (force !== true && !player.classList.contains("controls-visible")) return;
     player.classList.add("controls-visible");
     revealButton.setAttribute("aria-expanded", "true");
@@ -153,24 +168,100 @@
     lastMediaTime = video.currentTime;
   }
 
+  function displayInitializationProgress(progress) {
+    var fraction = progress.totalBytes > 0 ? Math.min(progress.loaded / progress.totalBytes, .99) : 0;
+    var percent = progress.total ? Math.floor((progress.completed + fraction) / progress.total * 100) : 0;
+    byId("cache-progress").value = percent;
+    byId("cache-progress").setAttribute("value", String(percent));
+    var detail = "";
+    if (progress.loaded > 0) {
+      detail = " · " + (progress.loaded / 1048576).toFixed(1) + " MB";
+      if (progress.totalBytes > 0) detail += " / " + (progress.totalBytes / 1048576).toFixed(1) + " MB";
+    }
+    byId("cache-progress-label").textContent = progress.completed + " / " + progress.total + " videos ready · " + percent + "%" + detail;
+    byId("status-message").textContent = progress.completed === progress.total ? "Your playlist is ready." : "Preparing “" + (progress.title || progress.src) + "” for local playback.";
+    cacheStatus = "Initializing: " + progress.completed + " / " + progress.total;
+    updateDiagnostics();
+  }
+
+  function initializationFailed(error) {
+    generation += 1;
+    cacheReady = false;
+    video.pause();
+    latestError = error.message || String(error);
+    cacheStatus = "Initialization incomplete";
+    setState("cache-error", "Let’s get your stream ready.", latestError + " Select Retry initialization to continue, or Play without preparation to use the connection directly.");
+    byId("cache-retry-button").focus();
+  }
+
+  function initializePlaylist() {
+    if (configError || state === "initializing") return;
+    clearTimeout(skipTimer);
+    generation += 1;
+    var initializationGeneration = generation;
+    cacheReady = false;
+    setState("initializing", "Initializing stream…", "Preparing your playlist. Playback will begin when every video is ready.");
+    video.pause();
+    byId("cache-progress").value = 0;
+    byId("cache-progress").setAttribute("value", "0");
+    byId("cache-progress-label").textContent = "Checking your playlist…";
+    cacheStatus = "Checking browser storage";
+    updateDiagnostics();
+    try {
+      if (!window.SignageMediaCache) throw new Error("Stream preparation is unavailable. Reload the page, or select Play without preparation.");
+      if (!mediaCache) mediaCache = window.SignageMediaCache.create({ baseUrl: document.baseURI, version: settings.videoCacheVersion });
+      Promise.resolve(mediaCache.prepare(playlist, function (progress) {
+        if (generation === initializationGeneration) displayInitializationProgress(progress);
+      })).then(function () {
+        if (generation !== initializationGeneration) return;
+        cacheReady = true;
+        cacheStatus = "Browser storage · playlist ready";
+        loadItem(index, false);
+      }).catch(function (error) {
+        if (generation === initializationGeneration) initializationFailed(error);
+      });
+    } catch (error) { initializationFailed(error); }
+  }
+
+  function attachSource(source) {
+    var previousSource = activeSource;
+    video.pause();
+    video.src = source.url;
+    activeSource = source;
+    video.load();
+    // Release only after detaching the old source; retain one Blob URL at a time.
+    if (previousSource && previousSource.release) previousSource.release();
+    setState("loading", "Getting ready.", "Loading “" + current().title + "”. Playback starts " + (video.muted ? "muted." : "with sound."));
+    resetProgress();
+    attemptPlay();
+  }
+
   function loadItem(position, manual) {
     clearTimeout(skipTimer);
     skipTimer = null;
     if (configError) return;
+    if (settings.cacheVideosBeforePlayback && !cacheReady) return;
     if (manual) failed.clear();
     generation += 1;
     index = (position + playlist.length) % playlist.length;
-    setState("loading", "Getting ready.", "Loading “" + current().title + "”. Playback starts " + (video.muted ? "muted." : "with sound."));
+    var sourceGeneration = generation;
+    setState("preparing", "Preparing playback.", "Opening “" + current().title + "”.");
     video.pause();
-    video.src = current().src;
-    video.load();
     byId("track-label").textContent = "NOW PLAYING";
     byId("track-title").textContent = current().title;
     byId("persistent-ad-name").textContent = current().title;
     byId("track-position").textContent = String(index + 1).padStart(2, "0") + " / " + String(playlist.length).padStart(2, "0");
     updateProgress();
-    resetProgress();
-    attemptPlay();
+    if (settings.cacheVideosBeforePlayback) {
+      mediaCache.getSource(current().src).then(function (source) {
+        if (sourceGeneration !== generation) { source.release(); return; }
+        attachSource(source);
+      }).catch(function (error) {
+        if (sourceGeneration === generation) initializationFailed(error);
+      });
+    } else {
+      attachSource({ url: current().src });
+    }
   }
 
   function attemptPlay() {
@@ -221,6 +312,12 @@
 
   function startPlayback() {
     if (configError) return;
+    if (state === "initializing" || state === "preparing") return;
+    if (settings.cacheVideosBeforePlayback && !cacheReady) {
+      initializePlaylist();
+      requestStartupFullscreen();
+      return;
+    }
     if (state === "error" || !video.getAttribute("src")) {
       loadItem(index, true);
     } else {
@@ -250,6 +347,7 @@
     if (isActive()) loadItem(index + 1, false);
   });
   video.addEventListener("error", function () {
+    if (state === "initializing" || state === "cache-error" || state === "preparing") return;
     if (!video.error) return;
     var descriptions = {
       1: "Video loading was interrupted.",
@@ -288,7 +386,18 @@
 
   startButton.addEventListener("click", startPlayback);
   nextButton.addEventListener("click", function () { loadItem(index + 1, true); });
-  retryButton.addEventListener("click", function () { loadItem(index, true); });
+  retryButton.addEventListener("click", function () {
+    if (settings.cacheVideosBeforePlayback && !cacheReady) initializePlaylist();
+    else loadItem(index, true);
+  });
+  byId("cache-retry-button").addEventListener("click", function () { initializePlaylist(); requestStartupFullscreen(); });
+  byId("stream-without-cache").addEventListener("click", function () {
+    if (state !== "cache-error") return;
+    settings.cacheVideosBeforePlayback = false;
+    cacheStatus = "Network playback · preparation skipped";
+    loadItem(index, true);
+    requestStartupFullscreen();
+  });
   pauseButton.addEventListener("click", function () {
     if (state === "paused") { startPlayback(); return; }
     if (!isActive()) return;
@@ -368,7 +477,16 @@
   });
   player.addEventListener("mousemove", function () { showControls(); });
   player.addEventListener("touchstart", function () { showControls(); }, { passive: true });
-  video.addEventListener("click", function () { showControls(); });
+  player.addEventListener("click", function (event) {
+    // A button handles its own action. In particular, do not immediately undo
+    // Hide controls when its click bubbles up to the player.
+    var target = event.target;
+    while (target && target !== player) {
+      if (target.tagName === "BUTTON") return;
+      target = target.parentElement;
+    }
+    showControls(true);
+  });
   player.addEventListener("focusin", function (event) {
     // Focusing the reveal button via Tab should leave it visible until activated.
     if (event.target !== revealButton) showControls();
@@ -438,7 +556,8 @@
     else diagnosticsButton.focus();
   } else {
     startButton.focus();
-    loadItem(0, false);
+    if (settings.cacheVideosBeforePlayback) initializePlaylist();
+    else loadItem(0, false);
     requestStartupFullscreen();
   }
 }());
