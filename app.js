@@ -16,6 +16,7 @@
   var revealButton = byId("show-controls");
   var panel = byId("status-panel");
   var configuredSettings = window.SIGNAGE_SETTINGS || {};
+  var enableVideoCache = configuredSettings.enableVideoCache !== false;
   var playbackMode = "stream";
   var modeConfigError = "";
   if (typeof configuredSettings.playbackMode !== "undefined") {
@@ -28,7 +29,11 @@
     if (configuredSettings.cacheVideosBeforePlayback === true) playbackMode = "cache-first";
     else if (configuredSettings.cacheVideosInBackground === false) playbackMode = "direct";
   }
+  // Normal playback delegates HTTP caching to the browser. Do not inspect,
+  // populate, or delete our Cache Storage when the master switch is disabled.
+  if (!enableVideoCache) { playbackMode = "direct"; modeConfigError = ""; }
   var settings = {
+    enableVideoCache: enableVideoCache,
     playbackMode: playbackMode,
     startMuted: typeof configuredSettings.startMuted === "boolean" ? configuredSettings.startMuted : false,
     fullscreenOnStart: typeof configuredSettings.fullscreenOnStart === "boolean" ? configuredSettings.fullscreenOnStart : true,
@@ -58,7 +63,7 @@
   var configError = modeConfigError;
   var mediaCache = null;
   var cacheReady = false;
-  var cacheStatus = settings.cacheVideosBeforePlayback ? "Awaiting initialization" : "Network playback";
+  var cacheStatus = !settings.enableVideoCache ? "Browser-managed playback (HTTP cache)" : settings.cacheVideosBeforePlayback ? "Awaiting initialization" : "Network playback";
   var activeSource = null;
   var backgroundCacheStatus = "";
   var backgroundRunning = false;

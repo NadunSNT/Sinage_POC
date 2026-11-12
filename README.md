@@ -1,6 +1,6 @@
 # Digital Signage Web Player POC
 
-A static, TV-friendly browser player that runs an ordered video playlist on repeat. By default, it shows a brief initialization screen, streams the first video without waiting for any complete file, and prepares local copies in the background. Completed files are reused at later transitions and visits. It uses plain HTML, CSS, and JavaScript with no framework, build, runtime dependencies, accounts, or backend. Deploy the files directly to GitHub Pages or serve them with any static HTTP server.
+A static, TV-friendly browser player that runs an ordered video playlist on repeat. It currently uses normal browser playback and automatic HTTP caching, with the custom video cache disabled. Optional custom caching can prepare files in the background or wait for the complete playlist before playback. It uses plain HTML, CSS, and JavaScript with no framework, build, runtime dependencies, accounts, or backend. Deploy the files directly to GitHub Pages or serve them with any static HTTP server.
 
 The playlist uses the three locally supplied files `ad-01.mp4`, `ad-02.mp4`, and `ad-03.mp4` in `assets/videos/`. No sample media was generated for the app. If you distribute the code without those files, supply your own MP4s and update the playlist. Missing clips report readable errors and can be skipped. The optional full-preparation mode instead waits for every file, with Retry initialization and Play without preparation recovery options. Missing-file HTTP errors in the browser console are expected until the clips are available.
 
@@ -68,7 +68,7 @@ php -S 127.0.0.1:8000
 
 To verify a repository subpath, run the Python command from the **parent directory** and open `http://localhost:8000/Sinage_POC/` (replace the folder name if different). All app assets and video sources resolve relative to that project path.
 
-For a TV on the same network, use the development computer’s LAN IP, for example `http://192.168.1.10:8000/`, while the server is running. The server must accept LAN connections and your firewall must allow the port. `localhost` on a TV refers to the TV itself. **Browser video storage needs a secure context:** GitHub Pages HTTPS or localhost on the computer works; a plain HTTP LAN IP generally does not. In the default background mode, streaming still starts when storage is unavailable; diagnostics records the storage failure. Use the HTTPS GitHub Pages URL for the client caching test.
+For a TV on the same network, use the development computer’s LAN IP, for example `http://192.168.1.10:8000/`, while the server is running. The server must accept LAN connections and your firewall must allow the port. `localhost` on a TV refers to the TV itself. Normal playback works without the custom cache. **Custom browser video storage needs a secure context:** GitHub Pages HTTPS or localhost on the computer works; a plain HTTP LAN IP generally does not. In optional background mode, streaming still starts when storage is unavailable; diagnostics records the storage failure. Use the HTTPS GitHub Pages URL for the custom caching test.
 
 ## Publish to GitHub Pages
 
@@ -104,6 +104,7 @@ window.SIGNAGE_SETTINGS = {
   showLogoAlways: true,
   showPlayerControlsButton: false,
   showAdNameAlways: false,
+  enableVideoCache: false,
   playbackMode: "stream",
   streamStartupDelaySeconds: 3,
   videoCacheVersion: "1"
@@ -116,11 +117,14 @@ window.SIGNAGE_SETTINGS = {
 - `showLogoAlways: true` keeps the top-left logo visible when controls are hidden. Set it to `false` to show the logo only with the controls. **Logo always: On/Off** toggles this during the current session.
 - `showPlayerControlsButton: false` hides the floating **Player controls** button. Set it to `true` to offer that clickable way to reopen hidden controls. **Controls button: On/Off** toggles its availability during the current session; it appears only while the toolbar is hidden.
 - `showAdNameAlways: false` shows the ad name only in the visible toolbar. Set it to `true` to keep the current playlist title at the bottom-left when the toolbar is hidden. **Ad name always: On/Off** toggles this during the current session. The text updates on every video change.
-- `playbackMode` selects the playback strategy; use `"stream"` or `"cache-first"` as described below. Advanced testing can use `"direct"` for immediate network playback without application-managed caching or the startup countdown.
+- `enableVideoCache: false` disables our custom Cache Storage reads/writes, Blob URL playback, background transfers, and initialization countdown. Videos load normally through the `<video>` element; ordinary browser HTTP caching is still allowed. Set it to `true` to use the configured `playbackMode`.
+- `playbackMode` selects the custom caching strategy **only when `enableVideoCache: true`**; use `"stream"` or `"cache-first"` as described below. Advanced testing can use `"direct"` for immediate network playback without application-managed caching or the startup countdown.
 - `streamStartupDelaySeconds: 3` sets the TV color-bar startup interval in stream mode. The first video starts streaming after that interval even if no video is fully cached. Longer waits such as `60` or `120` are supported; there is no 30-second cap. Set `0` to skip the countdown. Negative values are treated as zero; a cached first clip can start immediately without this wait.
 - `videoCacheVersion: "1"` identifies the current video content. **Change this value when overwriting an existing filename**, for example to `"2"`, then reload. Otherwise an already prepared file is intentionally reused. Renaming a file or adding a new path prepares that file automatically; removed paths are pruned from this project's media storage.
 
-Choose one mode in `settings.js`, publish the changes, and reload:
+For normal playback, leave `enableVideoCache: false`. The browser decides how much media to buffer and reuse according to its own policies and the server's cache headers; this does not guarantee complete-video storage or offline playback. Existing custom cache entries are retained but ignored, so they can be reused if you enable the feature again. Diagnostics shows **Browser-managed playback (HTTP cache)** in this mode.
+
+For custom caching, set `enableVideoCache: true`, choose one mode below, publish the changes, and reload:
 
 | Setting | Startup and playback |
 | --- | --- |
@@ -129,7 +133,7 @@ Choose one mode in `settings.js`, publish the changes, and reload:
 
 `streamStartupDelaySeconds` applies to stream mode only. Cache-first mode waits for actual file completion, regardless of that countdown setting. Changing modes does not clear already prepared videos. Diagnostics (**D**) displays the selected mode and active source. Invalid mode values stop with a readable settings error.
 
-For older published configurations without `playbackMode`, the previous `cacheVideosBeforePlayback` / `cacheVideosInBackground` flags still work. An explicit `playbackMode` takes precedence; use the single mode setting for new configuration changes.
+For older published configurations, omitting `enableVideoCache` keeps the custom cache enabled. Without `playbackMode`, the previous `cacheVideosBeforePlayback` / `cacheVideosInBackground` flags still work. An explicit `playbackMode` takes precedence over those legacy flags, and `enableVideoCache: false` overrides all caching modes.
 
 **Any keyboard or remote key reveals hidden controls**, including letters, arrows, Enter/OK, Tab and Escape. Clicking or tapping the video or player background also reveals them. When controls are already visible, Escape hides them (or closes open diagnostics first). Mouse movement, playback transitions, fullscreen events, and returning to the tab do not reveal hidden controls. If the floating button is enabled, clicking it is another option. Startup, paused, error, and playback-permission prompts remain available so playback can be started or recovered.
 
@@ -139,7 +143,7 @@ Browsers may require a user gesture for [playback with sound](https://developer.
 
 ## Stream startup and browser storage
 
-In the default **background mode**, a cold visit displays static TV color bars, the signage logo, **Initializing stream…**, a progress bar, and a short startup countdown. After `streamStartupDelaySeconds`, the first video streams directly from its URL. Startup does not wait for the first complete video or the full playlist. If a cached first clip is available promptly, it starts immediately. Sound/fullscreen policies may still require Start afterward.
+With the custom cache enabled in **background mode**, a cold visit displays static TV color bars, the signage logo, **Initializing stream…**, a progress bar, and a short startup countdown. After `streamStartupDelaySeconds`, the first video streams directly from its URL. Startup does not wait for the first complete video or the full playlist. If a cached first clip is available promptly, it starts immediately. Sound/fullscreen policies may still require Start afterward.
 
 Background preparation runs sequentially, prioritizing upcoming clips and initially deferring the clip that is actively streaming. Deferred clips become eligible after a transition; a single-video playlist becomes eligible after its first pass. At each video change, the player selects a completed cached copy if available, otherwise it streams that clip. Cache completion never replaces or restarts the currently playing video. Diagnostics shows the active source and the number of background files ready. Slow cache lookups fall back to streaming after 1.5 seconds; a late local result is released.
 
@@ -157,7 +161,7 @@ Browser storage is [best-effort and may be evicted](https://developer.mozilla.or
 
 ## Playback and controls
 
-- After initialization, the player attempts inline autoplay with the sound preference in `settings.js` (sound on by default). If the browser blocks it, select **Start playback** with a click, Enter, or the remote’s OK button. Start also appears while loading or paused.
+- The player attempts inline autoplay with the sound preference in `settings.js` (sound on by default), after initialization if custom caching is enabled. If the browser blocks it, select **Start playback** with a click, Enter, or the remote’s OK button. Start also appears while loading or paused.
 - Videos advance on `ended` and loop from the last entry to the first. A single video repeats. The app uses one video element for reliability; gaps between clips may occur while the next file loads. Seamless transitions are not guaranteed.
 - Controls can start hidden according to settings. Press any key or remote button, or click/tap the video or player background, to reveal them; mouse movement does not reveal hidden controls. When enabled in settings, **Player controls** can also reveal them. **Hide controls** hides them immediately. Visible controls auto-hide after 4.5 seconds of playback when no button has focus; focused controls stay visible for remote navigation.
 - **Pause / Resume** retains the current position. **Next video** advances immediately. **Retry** reloads the current file and begins a fresh recovery pass. **Unmute / Mute** lets you change sound during playback; mute preference lasts for the current page session.
@@ -177,7 +181,7 @@ Test the HTTP URL in Chrome, Edge, and Firefox using at least two real clips. Ch
 
 To exercise blocked autoplay, use a browser/profile with autoplay blocked (Firefox offers site autoplay permissions), or change the browser’s autoplay policy. Confirm Start begins playback with the configured sound preference and retries fullscreen when enabled. Test fullscreen entry and exit with actual button presses; browser policy can reject programmatic requests.
 
-For background-mode tests, clear this project's media storage or use a new `videoCacheVersion`. Throttle the connection and confirm the first video begins streaming after the configured countdown without waiting for a full file. Watch diagnostics for background progress. Confirm completing a cache write does not restart playback, and later transitions use cached clips where available. Test a single-video loop, missing clips, and unavailable/full storage. After all clips are cached, reload with the same version and check Network: app files still load, but cached video bodies should be reused.
+First test normal playback with `enableVideoCache: false`: there should be no custom initialization countdown, Cache Storage activity, or background preparation requests. Browser-managed media buffering/caching still applies. For background-mode tests, set `enableVideoCache: true`, clear this project's media storage or use a new `videoCacheVersion`. Throttle the connection and confirm the first video begins streaming after the configured countdown without waiting for a full file. Watch diagnostics for background progress. Confirm completing a cache write does not restart playback, and later transitions use cached clips where available. Test a single-video loop, missing clips, and unavailable/full storage. After all clips are cached, reload with the same version and check Network: app files still load, but cached video bodies should be reused.
 
 Also test cache-first mode by setting `playbackMode: "cache-first"`: color bars/logo/progress should remain until every video is ready. Interrupt preparation, retry, and confirm completed files are reused. Once every clip is stored, disconnect and observe at least two transitions in the open page. Do not assume the page will reload offline.
 
@@ -198,7 +202,7 @@ These use Node’s built-in test runner, a simulated media element, and an in-me
 ## Android Smart TV / kiosk browser
 
 1. Connect the TV to the internet and open the published URL in its browser. If the TV has no compatible web browser, separately install a compatible browser through an available device/app-store process.
-2. On the first visit, the TV color-bar **Initializing stream…** screen briefly counts down, then starts the first stream while preparation continues in the background. Full-preparation mode instead waits for every video. On later visits, cached clips should be reused. Press **Start playback** if prompted. Use directional keys to focus buttons and OK to select. Default audio is enabled; configure `startMuted: true` if you prefer muted startup.
+2. With `enableVideoCache: false`, videos use normal browser playback without a preparation countdown. With the custom cache enabled, background mode shows a brief TV color-bar **Initializing stream…** countdown; cache-first mode waits for every video. Press **Start playback** if prompted. Use directional keys to focus buttons and OK to select. Default audio is enabled; configure `startMuted: true` if you prefer muted startup.
 3. Select **Enter fullscreen** if supported. If not, try the browser’s own fullscreen setting or a compatible third-party kiosk browser.
 4. Observe at least two transitions and a full playlist loop. Leave playback running for **30–60 minutes**. Use diagnostics to record any failures and the filename/encoding involved.
 5. Record the TV make/model, Android/firmware version, browser name/version, tested URL, network, clip codecs/resolution, autoplay/fullscreen results, and duration of the run.
@@ -236,7 +240,8 @@ Treat the repository and Pages URLs as public. Include only approved demo media 
 - [ ] Add at least two real MP4 clips; verify all app/media requests from an HTTP URL and a repository subpath.
 - [ ] Confirm there are no unexpected JavaScript console errors with valid clips.
 - [ ] Verify configured sound/fullscreen startup, a clear Start fallback, and manual Start with mouse and remote/Enter; test both values of each setting.
-- [ ] Confirm first-visit color bars, logo and countdown; even the first video streams after the startup interval without waiting for a completed file.
+- [ ] With `enableVideoCache: false`, confirm normal playback without custom storage requests or initialization countdown.
+- [ ] With `enableVideoCache: true`, confirm first-visit color bars, logo and countdown in stream mode; even the first video streams after the startup interval without waiting for a completed file.
 - [ ] Confirm background progress and cached source selection on later transitions; cache completion does not restart the active clip.
 - [ ] Test full-preparation mode separately; it should wait for the complete playlist.
 - [ ] Reload with the same cache version; confirm videos are reused without video network requests.

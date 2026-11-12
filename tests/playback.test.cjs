@@ -646,3 +646,35 @@ test('invalid playback modes show a settings error without media or cache reques
     assert.match(app.elements['status-message'].textContent,/Invalid playbackMode/);
   }
 });
+
+test('disabling the custom cache uses normal video URLs for startup, progression, and retry', () => {
+  let cacheCalls=0;
+  const app=setup({settings:{enableVideoCache:false,playbackMode:'cache-first',streamStartupDelaySeconds:60},mediaCache:{create:()=>{cacheCalls++;throw new Error('Custom cache must not be used');}}});
+  assert.equal(app.playCalls,1);
+  assert.equal(app.video.src,'assets/videos/one.mp4');
+  assert.equal(app.elements['initialization-screen'].hidden,true);
+  assert.match(app.elements['diag-cache'].textContent,/Browser-managed playback/);
+  app.playing();app.video.fire('ended');
+  assert.equal(app.video.src,'assets/videos/two.mp4');
+  app.elements['retry-button'].click();
+  assert.equal(app.video.src,'assets/videos/two.mp4');
+  assert.equal(cacheCalls,0);
+});
+
+test('reenabling the custom cache honors the configured cache-first strategy', async () => {
+  let finish;
+  const app=setup({settings:{enableVideoCache:true,playbackMode:'cache-first'},mediaCache:{create:()=>({
+    prepare:()=>new Promise(resolve=>{finish=resolve;}),getSource:async()=>({url:'blob:prepared',release(){}})
+  })}});
+  assert.equal(app.state,'initializing');
+  assert.equal(app.playCalls,0);
+  finish();await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(app.video.src,'blob:prepared');
+  assert.equal(app.playCalls,1);
+});
+
+test('an inactive cache mode does not prevent normal playback when custom caching is disabled', () => {
+  const app=setup({settings:{enableVideoCache:false,playbackMode:'unused-mode'}});
+  assert.equal(app.state,'loading');
+  assert.equal(app.playCalls,1);
+});
