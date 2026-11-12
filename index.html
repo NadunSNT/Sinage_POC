@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b1014">
+  <meta name="color-scheme" content="dark">
+  <title>Signage · Web Player</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./settings.js" defer></script>
+  <script src="./playlist.js" defer></script>
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <main id="player" class="player controls-visible" aria-label="Digital signage player">
+    <video id="video" autoplay playsinline preload="auto" tabindex="0" aria-label="Signage video"></video>
+
+    <header class="masthead chrome">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">s<span>.</span></span><span>SIGNAGE<span class="brand-detail">WEB PLAYER / POC</span></span></div>
+      <span id="status-badge" class="status-badge"><span aria-hidden="true"></span><span id="status-label">Starting</span></span>
+    </header>
+
+    <section id="status-panel" class="status-panel" aria-labelledby="status-title">
+      <div class="play-backdrop" aria-hidden="true">
+        <svg viewBox="0 0 100 100" focusable="false"><path d="M 41 32 L 67 50 L 41 68 Z" /></svg>
+      </div>
+      <div class="status-content">
+        <p class="eyebrow">YOUR SCREEN, IN MOTION</p>
+        <h1 id="status-title">Getting ready.</h1>
+        <p id="status-message" class="status-message" role="status" aria-live="polite">Loading your playlist and startup preferences.</p>
+        <div id="loading-indicator" class="loading-indicator" aria-hidden="true"><span></span><span></span><span></span></div>
+        <button id="start-button" class="button primary" type="button">Start playback <span aria-hidden="true">▶</span></button>
+        <p id="setup-note" class="setup-note" hidden>Add your MP4 files to <code>assets/videos/</code> and update <code>playlist.js</code>, then retry.</p>
+      </div>
+    </section>
+
+    <aside id="diagnostics" class="diagnostics" aria-labelledby="diagnostics-title" hidden>
+      <div class="diagnostics-heading"><h2 id="diagnostics-title">Playback diagnostics</h2><button id="close-diagnostics" class="icon-button" type="button" aria-label="Close diagnostics">×</button></div>
+      <dl>
+        <dt>File</dt><dd id="diag-file">—</dd>
+        <dt>Playlist</dt><dd id="diag-position">—</dd>
+        <dt>State</dt><dd id="diag-state">Starting</dd>
+        <dt>Time / duration</dt><dd id="diag-time">—</dd>
+        <dt>Media readiness</dt><dd id="diag-ready">—</dd>
+        <dt>Sound</dt><dd id="diag-sound">Muted</dd>
+        <dt>Latest error</dt><dd id="diag-error">None</dd>
+      </dl>
+    </aside>
+
+    <footer id="control-panel" class="control-panel chrome" aria-label="Playback controls">
+      <div class="now-playing"><div><p class="eyebrow" id="track-label">PLAYLIST</p><p id="track-title" class="track-title">Preparing your screen</p></div><span id="track-position" class="track-position">— / —</span></div>
+      <div class="progress-track" role="progressbar" aria-label="Video progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="progress-fill"></span></div>
+      <div class="toolbar">
+        <nav class="actions" aria-label="Player actions">
+          <button id="pause-button" class="button" type="button" disabled>Pause</button>
+          <button id="next-button" class="button" type="button">Next video <span aria-hidden="true">→</span></button>
+          <button id="retry-button" class="button" type="button">Retry</button>
+          <button id="sound-button" class="button" type="button" aria-pressed="false">Unmute</button>
+          <button id="fullscreen-button" class="button" type="button">Enter fullscreen</button>
+          <button id="diagnostics-button" class="button" type="button" aria-expanded="false" aria-controls="diagnostics">Diagnostics</button>
+          <button id="logo-button" class="button" type="button" aria-pressed="false">Logo always: Off</button>
+          <button id="ad-name-button" class="button" type="button" aria-pressed="false" aria-controls="persistent-ad-name">Ad name always: Off</button>
+          <button id="controls-button-toggle" class="button" type="button" aria-pressed="false">Controls button: Off</button>
+          <button id="hide-controls" class="button" type="button" aria-controls="control-panel">Hide controls</button>
+        </nav>
+        <span class="keyboard-hint">ARROWS to navigate <span>·</span> ENTER to select <span>·</span> D for diagnostics</span>
+      </div>
+    </footer>
+
+    <p id="persistent-ad-name" class="persistent-ad-name" hidden></p>
+    <button id="show-controls" class="reveal-button" type="button" aria-controls="control-panel" aria-expanded="true">Player controls <span aria-hidden="true">⌃</span></button>
+    <p id="notice" class="notice" role="status" aria-live="polite" hidden></p>
+    <noscript><div class="noscript">JavaScript is required to play the playlist. Enable JavaScript and reload this page.</div></noscript>
+  </main>
+</body>
+</html>

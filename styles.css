@@ -1,0 +1,97 @@
+:root { color-scheme: dark; font-family: "Segoe UI", Arial, sans-serif; color: #eef3f4; background: #0b1014; --accent: #a5e5ce; --muted: #98a6ac; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+button { font: inherit; }
+button, video { -webkit-tap-highlight-color: transparent; }
+[hidden] { display: none !important; }
+.player { position: relative; width: 100%; height: 100vh; height: 100dvh; min-height: 460px; overflow: hidden; background: #0b1014; }
+video { display: block; width: 100%; height: 100%; object-fit: contain; background: #0b1014; outline-offset: -6px; }
+.chrome { position: absolute; z-index: 2; left: 0; right: 0; transition: opacity .2s; }
+.masthead { top: 0; display: flex; justify-content: space-between; align-items: center; padding: 30px 40px; background: linear-gradient(#0b1014ed, #0b101400); pointer-events: none; }
+.brand { display: flex; align-items: center; gap: 13px; font-size: 15px; font-weight: 650; letter-spacing: .16em; }
+.brand-mark { font-size: 41px; font-weight: 750; letter-spacing: -.12em; line-height: 1; padding-right: 5px; }
+.brand-mark span { color: var(--accent); }
+.brand-detail { display: block; font-size: 9px; color: var(--muted); letter-spacing: .15em; margin-top: 5px; }
+.status-badge { display: inline-flex; align-items: center; gap: 9px; padding: 10px 14px; border: 1px solid #ffffff20; border-radius: 25px; font-size: 12px; color: #c6d2d7; background: #10191db3; }
+.status-badge > span:first-child { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.player[data-state="error"] .status-badge > span:first-child { background: #efb78c; }
+.status-panel {
+  position: absolute; z-index: 1; left: 50%; top: 45%; transform: translate(-50%, -50%);
+  width: min(600px, 90%); text-align: center;
+  --status-content-height: calc(100vh - 160px);
+}
+.play-backdrop {
+  position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 100%; height: 0; padding-bottom: 100%; border-radius: 50%;
+  background: rgba(19, 35, 33, .48); border: 1px solid rgba(165, 229, 206, .30);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, .16), inset 0 1px 0 rgba(255, 255, 255, .05);
+  -webkit-backdrop-filter: blur(5px); backdrop-filter: blur(5px); pointer-events: none;
+}
+.play-backdrop svg { position: absolute; inset: 0; width: 100%; height: 100%; fill: rgba(165, 229, 206, .04); stroke: rgba(165, 229, 206, .22); stroke-width: .8; stroke-linejoin: round; }
+.status-content { position: relative; padding: 36px 28px; max-height: var(--status-content-height); overflow-y: auto; }
+.status-panel h1, .status-panel .eyebrow, .status-panel .status-message, .status-panel .setup-note { text-shadow: 0 2px 8px rgba(0, 0, 0, .8); }
+.status-panel .eyebrow { color: var(--accent); }
+.status-panel .status-message { color: #e0e9e7; }
+.eyebrow { font-size: 10px; letter-spacing: .18em; font-weight: 650; color: var(--muted); margin: 0 0 13px; }
+h1 { font-size: clamp(30px, 3.3vw, 58px); letter-spacing: -.045em; font-weight: 500; margin: 0 0 18px; }
+.status-message { max-width: 590px; margin: 0 auto 26px; color: #adbbc1; font-size: clamp(16px, 1.3vw, 22px); line-height: 1.6; overflow-wrap: anywhere; }
+.button { min-height: 48px; padding: 12px 18px; border: 1px solid #ffffff26; border-radius: 7px; background: #172027; color: #e0e9ed; cursor: pointer; white-space: nowrap; font-size: 14px; }
+.button span { padding-left: 12px; }
+.button:hover, .icon-button:hover { background: #293a43; }
+.button:disabled { opacity: .35; cursor: default; }
+.primary { background: var(--accent); color: #10251e; border-color: var(--accent); padding: 15px 24px; min-height: 54px; font-size: 16px; font-weight: 650; }
+.primary:hover { background: #c5f5e4; }
+:focus-visible { outline: 3px solid #c7ffe9; outline-offset: 5px; }
+/* Also support TV browsers that do not implement :focus-visible. */
+button:focus { outline: 3px solid #c7ffe9; outline-offset: 4px; }
+.setup-note { color: var(--muted); font-size: 13px; line-height: 1.7; margin: 24px auto 0; max-width: 440px; }
+code { font-family: Consolas, monospace; color: #d2e3dc; }
+.loading-indicator { display: flex; justify-content: center; gap: 6px; margin: 0 0 22px; }
+.loading-indicator span { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); animation: pulse 1.4s infinite; }
+.loading-indicator span:nth-child(2) { animation-delay: .2s; }
+.loading-indicator span:nth-child(3) { animation-delay: .4s; }
+@keyframes pulse { 50% { opacity: .25; } }
+.control-panel { bottom: 0; padding: 45px 40px 29px; background: linear-gradient(#0b101400, #0b1014ed 33%, #0b1014); }
+.now-playing { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.now-playing .eyebrow { margin-bottom: 6px; }
+.track-title { font-size: 18px; font-weight: 450; margin: 0; overflow-wrap: anywhere; }
+.track-position { font-size: 13px; color: var(--muted); letter-spacing: .08em; white-space: nowrap; }
+.progress-track { height: 2px; background: #ffffff18; margin-bottom: 20px; }
+.progress-track span { display: block; height: 100%; background: var(--accent); width: 0; }
+.toolbar { display: flex; align-items: center; gap: 22px; justify-content: space-between; }
+.actions { display: flex; gap: 7px; flex-wrap: wrap; }
+.actions .button { min-height: 44px; padding: 9px 13px; font-size: 13px; }
+.actions .button span { padding-left: 8px; }
+.keyboard-hint { font-size: 10px; color: #9aa8af; line-height: 1.8; text-align: right; }
+.keyboard-hint span { padding: 0 5px; }
+.reveal-button { position: absolute; z-index: 3; right: 24px; bottom: 18px; min-height: 44px; padding: 10px 14px; border: 1px solid #ffffff26; background: #10191dd9; color: #d4dfe3; border-radius: 7px; font-size: 13px; cursor: pointer; }
+.reveal-button span { margin-left: 12px; }
+.controls-visible .reveal-button { visibility: hidden; }
+.player:not(.controls-visible) .chrome { visibility: hidden; opacity: 0; pointer-events: none; }
+.player:not(.controls-visible).logo-always .masthead { visibility: visible; opacity: 1; background: none; }
+.player:not(.controls-visible).logo-always .status-badge { visibility: hidden; }
+.persistent-ad-name { position: absolute; z-index: 2; left: 40px; bottom: 24px; margin: 0; max-width: calc(100% - 80px); padding: 10px 16px; border-radius: 7px; background: #0b1014d9; color: #eef3f4; font-size: clamp(18px, 1.3vw, 26px); overflow-wrap: anywhere; pointer-events: none; }
+.controls-visible .persistent-ad-name { display: none; }
+.player:not(.controls-visible) .notice { bottom: 90px; }
+.player:not(.controls-visible) .persistent-ad-name { max-width: calc(100% - 260px); }
+.player:not(.controls-visible):not(.reveal-button-enabled) .persistent-ad-name { max-width: calc(100% - 80px); }
+.diagnostics { position: absolute; z-index: 5; top: 96px; right: 32px; width: min(440px, calc(100% - 40px)); padding: 20px 24px; border: 1px solid #43544e; border-radius: 10px; background: #10191df5; box-shadow: 0 15px 60px #0006; }
+.diagnostics-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+h2 { font-size: 16px; font-weight: 550; margin: 0; }
+.icon-button { width: 44px; height: 44px; border: 1px solid #ffffff26; color: #dce8e3; background: #1b292d; border-radius: 6px; font-size: 24px; cursor: pointer; }
+dl { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 13px 18px; font-size: 13px; margin-bottom: 4px; }
+dt { color: #99aba5; } dd { margin: 0; overflow-wrap: anywhere; line-height: 1.5; }
+.notice { position: absolute; z-index: 6; left: 50%; bottom: 215px; transform: translateX(-50%); width: max-content; max-width: 88%; border: 1px solid #52645d; background: #15221ff5; border-radius: 8px; padding: 16px 22px; font-size: 16px; line-height: 1.5; }
+.noscript { position: absolute; inset: 0; display: grid; place-items: center; background: #0b1014; padding: 40px; font-size: 24px; z-index: 10; }
+@media (min-width: 1700px) { .masthead { padding: 40px 56px; } .control-panel { padding: 50px 56px 38px; } .button { min-height: 58px; font-size: 18px; padding: 15px 24px; } .primary { font-size: 20px; padding: 18px 30px; } .track-title { font-size: 24px; } .eyebrow, .keyboard-hint { font-size: 12px; } .status-badge { font-size: 15px; } .setup-note, dl { font-size: 16px; } .diagnostics { width: 520px; top: 120px; } }
+@media (min-width: 1700px) { .actions .button { min-height: 48px; padding: 11px 17px; font-size: 16px; } }
+@media (max-width: 1000px) { .keyboard-hint { display: none; } .masthead { padding: 22px; } .control-panel { padding: 32px 22px 22px; } .button { padding: 10px 14px; } .status-panel { top: 40%; } }
+@media (max-width: 600px) { .player { min-height: 720px; } .brand-detail { font-size: 8px; } .status-panel { top: 37%; } h1 { font-size: 32px; } .actions { display: grid; grid-template-columns: 1fr 1fr; width: 100%; } .button { font-size: 14px; } .now-playing { margin-bottom: 13px; } .status-message { font-size: 16px; } .diagnostics { right: 20px; top: 88px; max-height: calc(100% - 110px); overflow-y: auto; } .notice { bottom: 285px; } }
+@media (max-height: 600px) and (min-width: 601px) { .status-panel .eyebrow, .keyboard-hint { display: none; } .status-panel { top: 39%; } h1 { font-size: 30px; margin-bottom: 10px; } .status-message { font-size: 15px; margin-bottom: 14px; } .setup-note { margin-top: 12px; } .control-panel { padding-bottom: 16px; } .now-playing { margin-bottom: 10px; } .diagnostics { top: 20px; max-height: calc(100% - 40px); overflow-y: auto; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+@media (max-width: 600px) { .player.controls-visible { min-height: 960px; } .persistent-ad-name { left: 22px; bottom: 22px; max-width: calc(100% - 44px); } .player:not(.controls-visible) .persistent-ad-name { max-width: calc(100% - 220px); } .player:not(.controls-visible):not(.reveal-button-enabled) .persistent-ad-name { max-width: calc(100% - 44px); } }
+@media (max-width: 600px) {
+  .status-panel { top: 96px; transform: translateX(-50%); --status-content-height: calc(100vh - 120px); }
+  .status-content { padding: 28px 16px; }
+  .controls-visible .status-panel { --status-content-height: calc(100vh - 510px); }
+}
