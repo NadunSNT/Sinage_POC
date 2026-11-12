@@ -7,8 +7,7 @@ window.SIGNAGE_SETTINGS = {
   showLogoAlways: true,         // Keep the logo visible while controls are hidden
   showPlayerControlsButton: false, // Show the floating button when controls are hidden
   showAdNameAlways: true,      // Keep the current ad name visible during playback
-  cacheVideosBeforePlayback: false, // true waits for every video; overrides background mode
-  cacheVideosInBackground: true, // Stream first and prepare local copies while playing
-  streamStartupDelaySeconds: 30, // Brief initialization screen before the first stream
+  playbackMode: "stream", // "stream" = stream + background cache; "cache-first" = cache all, then play
+  streamStartupDelaySeconds: 60, // Brief initialization screen before the first stream
   videoCacheVersion: "1"        // Change this when replacing a video without renaming it
 };

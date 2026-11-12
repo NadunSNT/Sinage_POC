@@ -16,15 +16,28 @@
   var revealButton = byId("show-controls");
   var panel = byId("status-panel");
   var configuredSettings = window.SIGNAGE_SETTINGS || {};
+  var playbackMode = "stream";
+  var modeConfigError = "";
+  if (typeof configuredSettings.playbackMode !== "undefined") {
+    var requestedMode = typeof configuredSettings.playbackMode === "string" ? configuredSettings.playbackMode.trim().toLowerCase() : "";
+    if (["stream", "cache-first", "direct"].indexOf(requestedMode) !== -1) playbackMode = requestedMode;
+    else modeConfigError = 'Invalid playbackMode in settings.js. Use "stream", "cache-first", or "direct".';
+  } else {
+    // Keep previously published settings working. The explicit mode above takes
+    // precedence over the older pair of caching flags when both are present.
+    if (configuredSettings.cacheVideosBeforePlayback === true) playbackMode = "cache-first";
+    else if (configuredSettings.cacheVideosInBackground === false) playbackMode = "direct";
+  }
   var settings = {
+    playbackMode: playbackMode,
     startMuted: typeof configuredSettings.startMuted === "boolean" ? configuredSettings.startMuted : false,
     fullscreenOnStart: typeof configuredSettings.fullscreenOnStart === "boolean" ? configuredSettings.fullscreenOnStart : true,
     hideControlsOnStart: typeof configuredSettings.hideControlsOnStart === "boolean" ? configuredSettings.hideControlsOnStart : true,
     showLogoAlways: typeof configuredSettings.showLogoAlways === "boolean" ? configuredSettings.showLogoAlways : true,
     showPlayerControlsButton: typeof configuredSettings.showPlayerControlsButton === "boolean" ? configuredSettings.showPlayerControlsButton : false,
     showAdNameAlways: typeof configuredSettings.showAdNameAlways === "boolean" ? configuredSettings.showAdNameAlways : false,
-    cacheVideosBeforePlayback: typeof configuredSettings.cacheVideosBeforePlayback === "boolean" ? configuredSettings.cacheVideosBeforePlayback : false,
-    cacheVideosInBackground: typeof configuredSettings.cacheVideosInBackground === "boolean" ? configuredSettings.cacheVideosInBackground : true,
+    cacheVideosBeforePlayback: playbackMode === "cache-first",
+    cacheVideosInBackground: playbackMode === "stream",
     streamStartupDelaySeconds: typeof configuredSettings.streamStartupDelaySeconds === "number" && Number.isFinite(configuredSettings.streamStartupDelaySeconds) ? Math.max(0, Math.min(30, configuredSettings.streamStartupDelaySeconds)) : 3,
     videoCacheVersion: typeof configuredSettings.videoCacheVersion === "string" && configuredSettings.videoCacheVersion.trim() ? configuredSettings.videoCacheVersion.trim() : "1"
   };
@@ -42,7 +55,7 @@
   var LOAD_TIMEOUT_MS = 20000;
   var ERROR_DELAY_MS = 4000;
   var HIDE_CONTROLS_MS = 4500;
-  var configError = "";
+  var configError = modeConfigError;
   var mediaCache = null;
   var cacheReady = false;
   var cacheStatus = settings.cacheVideosBeforePlayback ? "Awaiting initialization" : "Network playback";
@@ -89,7 +102,8 @@
     byId("diag-time").textContent = formatTime(video.currentTime) + " / " + formatTime(video.duration);
     byId("diag-ready").textContent = video.readyState + " / 4 · network " + video.networkState;
     byId("diag-sound").textContent = video.muted ? "Muted" : "Sound on";
-    byId("diag-cache").textContent = cacheStatus + (backgroundCacheStatus ? " · " + backgroundCacheStatus : "");
+    var modeLabel = { stream: "Stream mode", "cache-first": "Cache-first mode", direct: "Direct mode" }[settings.playbackMode];
+    byId("diag-cache").textContent = modeLabel + " · " + cacheStatus + (backgroundCacheStatus ? " · " + backgroundCacheStatus : "");
     byId("diag-error").textContent = latestError || "None";
   }
 
@@ -540,6 +554,7 @@
     if (state !== "cache-error") return;
     settings.cacheVideosBeforePlayback = false;
     settings.cacheVideosInBackground = false;
+    settings.playbackMode = "direct";
     cacheStatus = "Network playback · preparation skipped";
     loadItem(index, true);
     requestStartupFullscreen();
@@ -697,7 +712,7 @@
     latestError = configError;
     nextButton.disabled = true;
     retryButton.disabled = true;
-    setState("empty", "Your playlist starts here.", configError);
+    setState("empty", modeConfigError ? "Check your playback settings." : "Your playlist starts here.", configError);
     if (settings.hideControlsOnStart) video.focus();
     else diagnosticsButton.focus();
   } else {

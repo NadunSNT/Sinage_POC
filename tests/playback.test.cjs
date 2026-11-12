@@ -399,7 +399,7 @@ test('cache mode shows the TV initialization screen and waits for the whole play
   let finish;
   let report;
   let sourceRequests = 0;
-  const app = setup({ settings:{cacheVideosBeforePlayback:true,cacheVideosInBackground:true},mediaCache:{create:()=>({
+  const app = setup({ settings:{playbackMode:'cache-first',cacheVideosBeforePlayback:false,cacheVideosInBackground:true},mediaCache:{create:()=>({
     prepare:(_,progress)=>{report=progress;return new Promise(resolve=>{finish=resolve;});},
     getSource:async()=>{sourceRequests++;return {url:'blob:one',release(){}};}
   })}});
@@ -488,7 +488,7 @@ test('background mode streams the first video after the startup interval without
   let prepareCalls=0;
   let queued;
   let preparationOptions;
-  const app=setup({settings:{cacheVideosInBackground:true,streamStartupDelaySeconds:3},mediaCache:{create:()=>({
+  const app=setup({settings:{playbackMode:'stream',cacheVideosBeforePlayback:true,cacheVideosInBackground:false,streamStartupDelaySeconds:3},mediaCache:{create:()=>({
     getSource:async()=>null,
     prepare:(items,_,options)=>{prepareCalls++;queued=items;preparationOptions=options;return new Promise(()=>{});}
   })}});
@@ -608,4 +608,24 @@ test('a one-video playlist is eligible for caching after its first streamed pass
   app.playing();app.video.fire('ended');
   await new Promise(resolve=>setImmediate(resolve));
   assert.deepEqual(decisions,[true,false]);
+});
+
+test('direct mode bypasses storage and countdown even when legacy cache flags are enabled', () => {
+  let cacheCalls=0;
+  const app=setup({settings:{playbackMode:'direct',cacheVideosBeforePlayback:true,cacheVideosInBackground:true,streamStartupDelaySeconds:30},mediaCache:{create:()=>{cacheCalls++;throw new Error('Storage should not be used');}}});
+  assert.equal(app.playCalls,1);
+  assert.equal(app.video.src,'assets/videos/one.mp4');
+  assert.equal(cacheCalls,0);
+  assert.equal(app.elements['initialization-screen'].hidden,true);
+  assert.match(app.elements['diag-cache'].textContent,/Direct mode/);
+});
+
+test('invalid playback modes show a settings error without media or cache requests', () => {
+  for (const playbackMode of ['', 'unknown', null, false]) {
+    const app=setup({settings:{playbackMode}});
+    assert.equal(app.state,'empty');
+    assert.equal(app.playCalls,0);
+    assert.equal(app.elements['start-button'].disabled,true);
+    assert.match(app.elements['status-message'].textContent,/Invalid playbackMode/);
+  }
 });

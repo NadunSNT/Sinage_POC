@@ -104,8 +104,7 @@ window.SIGNAGE_SETTINGS = {
   showLogoAlways: true,
   showPlayerControlsButton: false,
   showAdNameAlways: false,
-  cacheVideosBeforePlayback: false,
-  cacheVideosInBackground: true,
+  playbackMode: "stream",
   streamStartupDelaySeconds: 3,
   videoCacheVersion: "1"
 };
@@ -117,10 +116,20 @@ window.SIGNAGE_SETTINGS = {
 - `showLogoAlways: true` keeps the top-left logo visible when controls are hidden. Set it to `false` to show the logo only with the controls. **Logo always: On/Off** toggles this during the current session.
 - `showPlayerControlsButton: false` hides the floating **Player controls** button. Set it to `true` to offer that clickable way to reopen hidden controls. **Controls button: On/Off** toggles its availability during the current session; it appears only while the toolbar is hidden.
 - `showAdNameAlways: false` shows the ad name only in the visible toolbar. Set it to `true` to keep the current playlist title at the bottom-left when the toolbar is hidden. **Ad name always: On/Off** toggles this during the current session. The text updates on every video change.
-- `cacheVideosBeforePlayback: false` uses the quicker startup path. Set it to `true` to prepare the complete playlist before playback; this takes priority over background mode.
-- `cacheVideosInBackground: true` streams uncached clips and prepares local copies while playback continues. Set both caching flags to `false` for direct network playback without application-managed caching.
+- `playbackMode` selects the playback strategy; use `"stream"` or `"cache-first"` as described below. Advanced testing can use `"direct"` for immediate network playback without application-managed caching or the startup countdown.
 - `streamStartupDelaySeconds: 3` sets the brief TV color-bar startup interval in background mode. The first video starts streaming after that interval even if no video is fully cached. Values from 0 to 30 seconds are supported; a cached first clip can start immediately without this wait.
 - `videoCacheVersion: "1"` identifies the current video content. **Change this value when overwriting an existing filename**, for example to `"2"`, then reload. Otherwise an already prepared file is intentionally reused. Renaming a file or adding a new path prepares that file automatically; removed paths are pruned from this project's media storage.
+
+Choose one mode in `settings.js`, publish the changes, and reload:
+
+| Setting | Startup and playback |
+| --- | --- |
+| `playbackMode: "stream"` | Show the short initialization countdown, then stream uncached clips while preparing local copies in the background. Fully cached clips are used at later transitions; the first complete file is not required to start. |
+| `playbackMode: "cache-first"` | Show initialization progress until every playlist file is fully cached, then play from browser storage. No automatic network playback if preparation fails; Retry initialization or explicitly choose Play without preparation. |
+
+`streamStartupDelaySeconds` applies to stream mode only. Cache-first mode waits for actual file completion, regardless of that countdown setting. Changing modes does not clear already prepared videos. Diagnostics (**D**) displays the selected mode and active source. Invalid mode values stop with a readable settings error.
+
+For older published configurations without `playbackMode`, the previous `cacheVideosBeforePlayback` / `cacheVideosInBackground` flags still work. An explicit `playbackMode` takes precedence; use the single mode setting for new configuration changes.
 
 **Any keyboard or remote key reveals hidden controls**, including letters, arrows, Enter/OK, Tab and Escape. Clicking or tapping the video or player background also reveals them. When controls are already visible, Escape hides them (or closes open diagnostics first). Mouse movement, playback transitions, fullscreen events, and returning to the tab do not reveal hidden controls. If the floating button is enabled, clicking it is another option. Startup, paused, error, and playback-permission prompts remain available so playback can be started or recovered.
 
@@ -136,7 +145,7 @@ Background preparation runs sequentially, prioritizing upcoming clips and initia
 
 The native video stream and background preparation use separate requests. A background request that was started for an upcoming file may overlap with that file's later playback. **Both share the available bandwidth**, so this mode improves time to first playback but cannot guarantee buffer-free playback on a slow first visit. Use lower-bitrate clips or full-preparation mode if that tradeoff is unsuitable. Once clips have complete local copies, later loops can use those copies.
 
-In optional **full-preparation mode** (`cacheVideosBeforePlayback: true`), the initialization screen instead shows videos-ready counts and byte progress when available. Playback waits for the entire playlist. Errors stop this phase until Retry initialization or an explicit Play without preparation choice. Start, Next, and the playback watchdog do not bypass or interrupt full initialization.
+In **cache-first mode** (`playbackMode: "cache-first"`), the initialization screen instead shows videos-ready counts and byte progress when available. Playback waits for the entire playlist. Errors stop this phase until Retry initialization or an explicit Play without preparation choice. Start, Next, and the playback watchdog do not bypass or interrupt full initialization.
 
 The app uses the [Cache API](https://developer.mozilla.org/en-US/docs/Web/API/Cache) under the current project's URL and stores only complete successful responses. Interrupted or partial responses are never treated as ready. A preparation request with no transfer progress for 60 seconds stops; slow but progressing transfers can take longer overall. Background errors do not interrupt playback. Missing files do not prevent other files from being cached; a storage failure pauses background work, and **Retry** restarts the current clip and permits another preparation attempt. Already cached clips remain usable even after a background storage failure.
 
@@ -170,9 +179,9 @@ To exercise blocked autoplay, use a browser/profile with autoplay blocked (Firef
 
 For background-mode tests, clear this project's media storage or use a new `videoCacheVersion`. Throttle the connection and confirm the first video begins streaming after the configured countdown without waiting for a full file. Watch diagnostics for background progress. Confirm completing a cache write does not restart playback, and later transitions use cached clips where available. Test a single-video loop, missing clips, and unavailable/full storage. After all clips are cached, reload with the same version and check Network: app files still load, but cached video bodies should be reused.
 
-Also test full-preparation mode by setting `cacheVideosBeforePlayback: true`: color bars/logo/progress should remain until every video is ready. Interrupt preparation, retry, and confirm completed files are reused. Once every clip is stored, disconnect and observe at least two transitions in the open page. Do not assume the page will reload offline.
+Also test cache-first mode by setting `playbackMode: "cache-first"`: color bars/logo/progress should remain until every video is ready. Interrupt preparation, retry, and confirm completed files are reused. Once every clip is stored, disconnect and observe at least two transitions in the open page. Do not assume the page will reload offline.
 
-To check full-initialization failure handling, rename a video **and change the cache version** so a cached copy cannot mask it, then restore the file and Retry initialization. For direct-playback skip / finite failure-pass tests, set both `cacheVideosBeforePlayback` and `cacheVideosInBackground` to `false`, reload, and rename one or all files. Restore the desired caching settings afterward.
+To check full-initialization failure handling, rename a video **and change the cache version** so a cached copy cannot mask it, then restore the file and Retry initialization. For direct-playback skip / finite failure-pass tests, set `playbackMode: "direct"`, reload, and rename one or all files. Restore the desired mode afterward.
 
 Optional controller regression tests, if Node.js 18+ is already installed:
 
