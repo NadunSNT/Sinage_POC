@@ -206,3 +206,48 @@ test('project paths cannot read or prune a different project’s videos', async 
   await assert.rejects(env.create().prepare([{src:'https://elsewhere.test/video.mp4'}]), /inside this signage project/);
   assert.equal(env.requests.length,0);
 });
+
+test('background preparation defers the active stream and reports only completed files', async () => {
+  const env=environment();
+  const result=await env.create().prepare(playlist,env.report,{shouldDefer:src=>src===playlist[0].src,continueOnError:true});
+  assert.equal(result.completed,1);
+  assert.equal(result.total,2);
+  assert.deepEqual(Array.from(result.deferred),[playlist[0].src]);
+  assert.equal(env.requests.length,1);
+  assert.ok(env.requests[0].url.endsWith('two.mp4'));
+  assert.equal(env.progress.at(-1).completed,1);
+  assert.equal(await env.create().getSource(playlist[0].src,{allowMissing:true}),null);
+  assert.ok(await env.create().getSource(playlist[1].src,{allowMissing:true}));
+});
+
+test('background preparation continues past a missing clip without caching the bad response', async () => {
+  const env=environment({fetch:url=>url.endsWith('one.mp4')?new Response('missing',{status:404}):new Response('valid',{headers:{'Content-Type':'video/mp4'}})});
+  const result=await env.create().prepare(playlist,env.report,{continueOnError:true});
+  assert.equal(result.completed,1);
+  assert.equal(result.errors.length,1);
+  assert.match(result.errors[0].message,/HTTP 404/);
+  assert.equal([...env.stores.values()][0].size,1);
+  assert.equal(env.progress.at(-1).completed,1);
+});
+
+test('cache-first source lookup returns null for missing or corrupt entries when streaming is allowed', async () => {
+  const env=environment();
+  const manager=env.create();
+  assert.equal(await manager.getSource(playlist[0].src,{allowMissing:true}),null);
+  await manager.prepare([playlist[0]]);
+  const entries=[...env.stores.values()][0];
+  const [url,response]=[...entries.entries()][0];
+  entries.set(url,new Response('short',{headers:response.headers}));
+  assert.equal(await manager.getSource(playlist[0].src,{allowMissing:true}),null);
+  assert.equal(entries.size,0);
+});
+
+test('already cached active clips count as ready without being deferred', async () => {
+  const env=environment();
+  const manager=env.create();
+  await manager.prepare(playlist);
+  const result=await manager.prepare(playlist,null,{shouldDefer:()=>true});
+  assert.equal(result.completed,2);
+  assert.equal(result.deferred.length,0);
+  assert.equal(env.requests.length,2);
+});

@@ -65,7 +65,7 @@ function setup(options = {}) {
     document, window: { SignageMediaCache: options.mediaCache, SIGNAGE_PLAYLIST: Object.hasOwn(options, 'playlist') ? options.playlist : [{ title: 'One', src: 'assets/videos/one.mp4' }, { title: 'Two', src: 'assets/videos/two.mp4' }] },
     Date: class extends Date { static now() { return time; } },
     setTimeout: (cb, ms) => schedule(cb, ms), clearTimeout: id => tasks.delete(id),
-    setInterval: (cb, ms) => schedule(cb, ms, true), console
+    setInterval: (cb, ms) => schedule(cb, ms, true), clearInterval: id => tasks.delete(id), console
   });
   vm.runInContext(settingsSource, context);
   // Isolate controller tests from the user's editable preferences. Cache-specific
@@ -73,7 +73,7 @@ function setup(options = {}) {
   context.window.SIGNAGE_SETTINGS = Object.assign({
     startMuted: false, fullscreenOnStart: true, hideControlsOnStart: true,
     showLogoAlways: true, showPlayerControlsButton: false, showAdNameAlways: false,
-    cacheVideosBeforePlayback: false
+    cacheVideosBeforePlayback: false, cacheVideosInBackground: false
   }, options.settings);
   vm.runInContext(source, context);
   return {
@@ -399,7 +399,7 @@ test('cache mode shows the TV initialization screen and waits for the whole play
   let finish;
   let report;
   let sourceRequests = 0;
-  const app = setup({ settings:{cacheVideosBeforePlayback:true},mediaCache:{create:()=>({
+  const app = setup({ settings:{cacheVideosBeforePlayback:true,cacheVideosInBackground:true},mediaCache:{create:()=>({
     prepare:(_,progress)=>{report=progress;return new Promise(resolve=>{finish=resolve;});},
     getSource:async()=>{sourceRequests++;return {url:'blob:one',release(){}};}
   })}});
@@ -482,4 +482,130 @@ test('evicted local media returns to initialization recovery instead of freezing
   assert.equal(app.state,'cache-error');
   assert.match(app.elements['status-message'].textContent,/Stored video unavailable/);
   assert.equal(app.playCalls,0);
+});
+
+test('background mode streams the first video after the startup interval without waiting for cache', async () => {
+  let prepareCalls=0;
+  let queued;
+  let preparationOptions;
+  const app=setup({settings:{cacheVideosInBackground:true,streamStartupDelaySeconds:3},mediaCache:{create:()=>({
+    getSource:async()=>null,
+    prepare:(items,_,options)=>{prepareCalls++;queued=items;preparationOptions=options;return new Promise(()=>{});}
+  })}});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(app.state,'initializing');
+  assert.equal(app.playCalls,0);
+  assert.match(app.elements['cache-progress-label'].textContent,/3 seconds/);
+  app.tick(2999);
+  assert.equal(app.playCalls,0);
+  app.tick(1);
+  assert.equal(app.video.src,'assets/videos/one.mp4');
+  assert.equal(app.playCalls,1);
+  assert.equal(app.elements['initialization-screen'].hidden,true);
+  assert.equal(prepareCalls,1);
+  assert.equal(queued[0].src,'assets/videos/two.mp4');
+  assert.equal(preparationOptions.shouldDefer('assets/videos/one.mp4'),true);
+  assert.equal(preparationOptions.shouldDefer('assets/videos/two.mp4'),false);
+});
+
+test('a warm visit plays the cached first video without the startup interval', async () => {
+  const app=setup({settings:{cacheVideosInBackground:true,streamStartupDelaySeconds:10},mediaCache:{create:()=>({
+    getSource:async()=>({url:'blob:first',release(){}}),prepare:async()=>({completed:2,total:2,deferred:[],errors:[]})
+  })}});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(app.video.src,'blob:first');
+  assert.equal(app.playCalls,1);
+  app.tick(10000);
+  assert.equal(app.playCalls,1);
+});
+
+test('background cache completion never restarts active streaming and later clips use local copies', async () => {
+  let finish;
+  let cached=false;
+  const app=setup({settings:{cacheVideosInBackground:true,streamStartupDelaySeconds:0},mediaCache:{create:()=>({
+    getSource:async src=>cached?{url:'blob:'+src,release(){}}:null,
+    prepare:()=>new Promise(resolve=>{finish=resolve;})
+  })}});
+  app.tick(0);app.playing();
+  cached=true;finish({completed:2,total:2,deferred:[],errors:[]});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(app.video.src,'assets/videos/one.mp4');
+  assert.equal(app.state,'playing');
+  assert.equal(app.playCalls,1);
+  app.video.fire('ended');
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(app.video.src,'blob:assets/videos/two.mp4');
+  assert.equal(app.playCalls,2);
+});
+
+test('background storage failure leaves streaming active and already cached clips usable', async () => {
+  const app=setup({settings:{cacheVideosInBackground:true,streamStartupDelaySeconds:0},mediaCache:{create:()=>({
+    getSource:async src=>src.endsWith('two.mp4')?{url:'blob:two',release(){}}:null,
+    prepare:async()=>{throw new Error('Storage full');}
+  })}});
+  app.tick(0);app.playing();
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(app.state,'playing');
+  assert.equal(app.elements['initialization-screen'].hidden,true);
+  assert.match(app.elements['diag-cache'].textContent,/paused/);
+  app.video.fire('ended');
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(app.video.src,'blob:two');
+});
+
+test('unsupported cache does not prevent first-video streaming after the heads-up', () => {
+  const app=setup({settings:{cacheVideosInBackground:true,streamStartupDelaySeconds:1}});
+  assert.equal(app.state,'initializing');
+  app.tick(1000);
+  assert.equal(app.video.src,'assets/videos/one.mp4');
+  assert.equal(app.playCalls,1);
+  assert.match(app.elements['diag-cache'].textContent,/Network stream/);
+});
+
+test('late startup cache probes are released without replacing the active network video', async () => {
+  let deliver;
+  let released=0;
+  const app=setup({settings:{cacheVideosInBackground:true,streamStartupDelaySeconds:1},mediaCache:{create:()=>({
+    getSource:()=>new Promise(resolve=>{deliver=resolve;}),prepare:()=>new Promise(()=>{})
+  })}});
+  app.tick(1000);
+  deliver({url:'blob:late',release:()=>{released++;}});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(app.video.src,'assets/videos/one.mp4');
+  assert.equal(app.playCalls,1);
+  assert.equal(released,1);
+});
+
+test('slow transition cache lookups fall back to streaming and release late Blob URLs', async () => {
+  let deliver;
+  let released=0;
+  let lookups=0;
+  const app=setup({settings:{cacheVideosInBackground:true,streamStartupDelaySeconds:0},mediaCache:{create:()=>({
+    getSource:()=>++lookups===1?Promise.resolve(null):new Promise(resolve=>{deliver=resolve;}),
+    prepare:()=>new Promise(()=>{})
+  })}});
+  app.tick(0);app.playing();app.video.fire('ended');
+  app.tick(1500);
+  assert.equal(app.video.src,'assets/videos/two.mp4');
+  deliver({url:'blob:late-two',release:()=>{released++;}});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(app.video.src,'assets/videos/two.mp4');
+  assert.equal(released,1);
+});
+
+test('a one-video playlist is eligible for caching after its first streamed pass', async () => {
+  const decisions=[];
+  const app=setup({playlist:[{src:'assets/videos/only.mp4'}],settings:{cacheVideosInBackground:true,streamStartupDelaySeconds:0},mediaCache:{create:()=>({
+    getSource:async()=>null,
+    prepare:async(items,_,options)=>{
+      const deferred=options.shouldDefer(items[0].src);decisions.push(deferred);
+      return {completed:deferred?0:1,total:1,deferred:deferred?[items[0].src]:[],errors:[]};
+    }
+  })}});
+  app.tick(0);
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.deepEqual(decisions,[true]);
+  app.playing();app.video.fire('ended');
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.deepEqual(decisions,[true,false]);
 });

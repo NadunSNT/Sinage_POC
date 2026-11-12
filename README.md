@@ -1,8 +1,8 @@
 # Digital Signage Web Player POC
 
-A static, TV-friendly browser player that runs an ordered video playlist on repeat. By default, it prepares the entire playlist in browser storage before playing, then reuses those complete files on later visits. It uses plain HTML, CSS, and JavaScript with no framework, build, runtime dependencies, accounts, or backend. Deploy the files directly to GitHub Pages or serve them with any static HTTP server.
+A static, TV-friendly browser player that runs an ordered video playlist on repeat. By default, it shows a brief initialization screen, streams the first video without waiting for any complete file, and prepares local copies in the background. Completed files are reused at later transitions and visits. It uses plain HTML, CSS, and JavaScript with no framework, build, runtime dependencies, accounts, or backend. Deploy the files directly to GitHub Pages or serve them with any static HTTP server.
 
-The playlist uses the three locally supplied files `ad-01.mp4`, `ad-02.mp4`, and `ad-03.mp4` in `assets/videos/`. No sample media was generated for the app. If you distribute the code without those files, supply your own MP4s and update the playlist. Initialization waits for every configured video; a missing file produces a readable error with Retry initialization and an explicit Play without preparation fallback. Missing-file HTTP errors in the browser console are expected until the clips are available.
+The playlist uses the three locally supplied files `ad-01.mp4`, `ad-02.mp4`, and `ad-03.mp4` in `assets/videos/`. No sample media was generated for the app. If you distribute the code without those files, supply your own MP4s and update the playlist. Missing clips report readable errors and can be skipped. The optional full-preparation mode instead waits for every file, with Retry initialization and Play without preparation recovery options. Missing-file HTTP errors in the browser console are expected until the clips are available.
 
 ## Files
 
@@ -68,7 +68,7 @@ php -S 127.0.0.1:8000
 
 To verify a repository subpath, run the Python command from the **parent directory** and open `http://localhost:8000/Sinage_POC/` (replace the folder name if different). All app assets and video sources resolve relative to that project path.
 
-For a TV on the same network, use the development computer’s LAN IP, for example `http://192.168.1.10:8000/`, while the server is running. The server must accept LAN connections and your firewall must allow the port. `localhost` on a TV refers to the TV itself. **Browser video storage needs a secure context:** GitHub Pages HTTPS or localhost on the computer works; a plain HTTP LAN IP generally does not. For a LAN HTTP test, disable `cacheVideosBeforePlayback` or explicitly choose Play without preparation. Use the HTTPS GitHub Pages URL for the client caching test.
+For a TV on the same network, use the development computer’s LAN IP, for example `http://192.168.1.10:8000/`, while the server is running. The server must accept LAN connections and your firewall must allow the port. `localhost` on a TV refers to the TV itself. **Browser video storage needs a secure context:** GitHub Pages HTTPS or localhost on the computer works; a plain HTTP LAN IP generally does not. In the default background mode, streaming still starts when storage is unavailable; diagnostics records the storage failure. Use the HTTPS GitHub Pages URL for the client caching test.
 
 ## Publish to GitHub Pages
 
@@ -104,7 +104,9 @@ window.SIGNAGE_SETTINGS = {
   showLogoAlways: true,
   showPlayerControlsButton: false,
   showAdNameAlways: false,
-  cacheVideosBeforePlayback: true,
+  cacheVideosBeforePlayback: false,
+  cacheVideosInBackground: true,
+  streamStartupDelaySeconds: 3,
   videoCacheVersion: "1"
 };
 ```
@@ -115,7 +117,9 @@ window.SIGNAGE_SETTINGS = {
 - `showLogoAlways: true` keeps the top-left logo visible when controls are hidden. Set it to `false` to show the logo only with the controls. **Logo always: On/Off** toggles this during the current session.
 - `showPlayerControlsButton: false` hides the floating **Player controls** button. Set it to `true` to offer that clickable way to reopen hidden controls. **Controls button: On/Off** toggles its availability during the current session; it appears only while the toolbar is hidden.
 - `showAdNameAlways: false` shows the ad name only in the visible toolbar. Set it to `true` to keep the current playlist title at the bottom-left when the toolbar is hidden. **Ad name always: On/Off** toggles this during the current session. The text updates on every video change.
-- `cacheVideosBeforePlayback: true` shows the TV color-bar initialization screen and prepares every video before playback. Set it to `false` to use direct network playback instead.
+- `cacheVideosBeforePlayback: false` uses the quicker startup path. Set it to `true` to prepare the complete playlist before playback; this takes priority over background mode.
+- `cacheVideosInBackground: true` streams uncached clips and prepares local copies while playback continues. Set both caching flags to `false` for direct network playback without application-managed caching.
+- `streamStartupDelaySeconds: 3` sets the brief TV color-bar startup interval in background mode. The first video starts streaming after that interval even if no video is fully cached. Values from 0 to 30 seconds are supported; a cached first clip can start immediately without this wait.
 - `videoCacheVersion: "1"` identifies the current video content. **Change this value when overwriting an existing filename**, for example to `"2"`, then reload. Otherwise an already prepared file is intentionally reused. Renaming a file or adding a new path prepares that file automatically; removed paths are pruned from this project's media storage.
 
 **Any keyboard or remote key reveals hidden controls**, including letters, arrows, Enter/OK, Tab and Escape. Clicking or tapping the video or player background also reveals them. When controls are already visible, Escape hides them (or closes open diagnostics first). Mouse movement, playback transitions, fullscreen events, and returning to the tab do not reveal hidden controls. If the floating button is enabled, clicking it is another option. Startup, paused, error, and playback-permission prompts remain available so playback can be started or recovered.
@@ -124,15 +128,21 @@ These preferences apply on each page load. Manual mute, logo, ad-name, and float
 
 Browsers may require a user gesture for [playback with sound](https://developer.chrome.com/blog/autoplay) and [fullscreen](https://developer.mozilla.org/en-US/docs/Web/API/Element/requestFullscreen). If blocked, press Start playback / OK to retry both from a user action, or use Enter fullscreen directly. Settings cannot override browser policy; fully automatic launch requires compatible browser/device configuration. The player never silently switches to muted playback to bypass a sound permission rejection.
 
-## Stream initialization and browser storage
+## Stream startup and browser storage
 
-On a cold visit, the player displays static TV color bars, the signage logo, **Initializing stream…**, a progress bar, the number of videos ready, and byte progress when the server provides a size. It checks previously prepared files, then prepares missing or outdated ones sequentially. Start, Next, and the playback watchdog do not bypass or interrupt this phase. Playback begins only after the full configured playlist is available locally; sound/fullscreen policies may still require Start afterward.
+In the default **background mode**, a cold visit displays static TV color bars, the signage logo, **Initializing stream…**, a progress bar, and a short startup countdown. After `streamStartupDelaySeconds`, the first video streams directly from its URL. Startup does not wait for the first complete video or the full playlist. If a cached first clip is available promptly, it starts immediately. Sound/fullscreen policies may still require Start afterward.
 
-The app uses the [Cache API](https://developer.mozilla.org/en-US/docs/Web/API/Cache) under the current project's URL. It stores only complete successful responses. Interrupted or partial responses are not treated as ready; Retry initialization retains completed clips and retries the missing ones. A connection that makes no progress for 60 seconds stops with a recovery message. The overall initialization can take longer while bytes continue arriving. Without readable response streams, supported older browsers show per-video completion rather than continuous byte progress.
+Background preparation runs sequentially, prioritizing upcoming clips and initially deferring the clip that is actively streaming. Deferred clips become eligible after a transition; a single-video playlist becomes eligible after its first pass. At each video change, the player selects a completed cached copy if available, otherwise it streams that clip. Cache completion never replaces or restarts the currently playing video. Diagnostics shows the active source and the number of background files ready. Slow cache lookups fall back to streaming after 1.5 seconds; a late local result is released.
 
-Each video plays from a local Blob URL created from its stored body, avoiding network range requests during that clip. The previous URL is released after switching sources, so the app does not retain the entire playlist as active Blob URLs. This removes dependence on streaming bandwidth while a prepared clip plays; it does not fix unsupported codecs, slow decoding, or device memory limits. Keep clips reasonably small because preparing and opening one complete clip still uses memory.
+The native video stream and background preparation use separate requests. A background request that was started for an upcoming file may overlap with that file's later playback. **Both share the available bandwidth**, so this mode improves time to first playback but cannot guarantee buffer-free playback on a slow first visit. Use lower-bitrate clips or full-preparation mode if that tradeoff is unsuitable. Once clips have complete local copies, later loops can use those copies.
 
-On subsequent visits, complete files with the same path and version are reused without fetching the video again. Storage is scoped per project path, so another GitHub Pages project on the same origin is not cleared. If browser storage is unavailable or full, initialization waits for **Retry initialization**; **Play without preparation** explicitly switches to direct playback for that page session. There is no silent network fallback.
+In optional **full-preparation mode** (`cacheVideosBeforePlayback: true`), the initialization screen instead shows videos-ready counts and byte progress when available. Playback waits for the entire playlist. Errors stop this phase until Retry initialization or an explicit Play without preparation choice. Start, Next, and the playback watchdog do not bypass or interrupt full initialization.
+
+The app uses the [Cache API](https://developer.mozilla.org/en-US/docs/Web/API/Cache) under the current project's URL and stores only complete successful responses. Interrupted or partial responses are never treated as ready. A preparation request with no transfer progress for 60 seconds stops; slow but progressing transfers can take longer overall. Background errors do not interrupt playback. Missing files do not prevent other files from being cached; a storage failure pauses background work, and **Retry** restarts the current clip and permits another preparation attempt. Already cached clips remain usable even after a background storage failure.
+
+Cached videos play from local Blob URLs, avoiding video network range requests during those clips. The previous URL is released after switching sources, so the app does not retain the entire playlist as active Blob URLs. This does not fix unsupported codecs, slow decoding, or device memory limits. Keep clips reasonably small because preparing and opening one complete clip still uses memory.
+
+On subsequent visits, complete files with the same path and version are reused without fetching those videos again. Storage is scoped per project path, so another GitHub Pages project on the same origin is not cleared. In background mode, unavailable or missing storage falls back to streaming without stopping playback. Full-preparation mode retains its explicit error/recovery screen.
 
 Browser storage is [best-effort and may be evicted](https://developer.mozilla.org/en-US/docs/Web/API/Storage_API/Storage_quotas_and_eviction_criteria); clearing site data, using private browsing, or device storage pressure can require initialization again. Quotas are shared at the origin level. There is no service worker and the HTML/CSS/JavaScript page itself is not explicitly cached for offline launch. Prepared media can be reused while the page is open, but this is **not a guarantee of offline reload, offline boot, or unattended kiosk startup**. Validate storage capacity and Blob/video support on the target TV.
 
@@ -148,7 +158,7 @@ Browser storage is [best-effort and may be evicted](https://developer.mozilla.or
 
 ## Failure recovery
 
-Initialization errors wait for manual retry without starting playback. A stored file that disappears or is found incomplete returns to initialization recovery. During actual playback, a media error or 20 seconds without playback progress produces a readable error. The player waits four seconds, then tries an unfailed playlist entry. It stops automatically once every entry in the current failure pass has failed; it does not repeatedly hammer broken files. Any successful playback starts a fresh pass so a working clip can continue looping past a broken one.
+Background initialization/storage errors are recorded in diagnostics while streaming continues. A missing or incomplete stored file falls back to its network source. In full-preparation mode, initialization errors wait for manual retry; a missing stored file returns to initialization recovery. During actual playback, a media error or 20 seconds without playback progress produces a readable error. The player waits four seconds, then tries an unfailed playlist entry. It stops automatically once every entry in the current failure pass has failed; it does not repeatedly hammer broken files. Any successful playback starts a fresh pass so a working clip can continue looping past a broken one.
 
 Choose **Retry**, **Next video**, or **Start playback** to try again. Autoplay permission failures instead wait for user input without skipping the video. Intentional pauses do not time out. Repeated `waiting`/`stalled` events cannot keep extending the timeout. Background suspension and execution remain browser-controlled; on returning to the page, the timeout receives a fresh deadline.
 
@@ -158,9 +168,11 @@ Test the HTTP URL in Chrome, Edge, and Firefox using at least two real clips. Ch
 
 To exercise blocked autoplay, use a browser/profile with autoplay blocked (Firefox offers site autoplay permissions), or change the browser’s autoplay policy. Confirm Start begins playback with the configured sound preference and retries fullscreen when enabled. Test fullscreen entry and exit with actual button presses; browser policy can reject programmatic requests.
 
-For preparation tests, use a new `videoCacheVersion` or clear this project's media entries in browser developer tools. Throttle the connection and confirm color bars/logo/progress remain until every video is ready. Interrupt the connection, retry, and confirm completed clips are reused. Reload with the same version and check Network: the app files still load, but stored videos should not be fetched again. Once prepared, disconnect and observe at least two clip transitions in the open page. Do not assume the page will reload offline.
+For background-mode tests, clear this project's media storage or use a new `videoCacheVersion`. Throttle the connection and confirm the first video begins streaming after the configured countdown without waiting for a full file. Watch diagnostics for background progress. Confirm completing a cache write does not restart playback, and later transitions use cached clips where available. Test a single-video loop, missing clips, and unavailable/full storage. After all clips are cached, reload with the same version and check Network: app files still load, but cached video bodies should be reused.
 
-To check missing-file handling during initialization, rename a video **and change the cache version** so a cached copy cannot mask it, then restore the file and Retry initialization. For the original automatic skip / finite failure-pass tests, temporarily set `cacheVideosBeforePlayback: false`, reload, and rename one or all files. Re-enable preparation afterward.
+Also test full-preparation mode by setting `cacheVideosBeforePlayback: true`: color bars/logo/progress should remain until every video is ready. Interrupt preparation, retry, and confirm completed files are reused. Once every clip is stored, disconnect and observe at least two transitions in the open page. Do not assume the page will reload offline.
+
+To check full-initialization failure handling, rename a video **and change the cache version** so a cached copy cannot mask it, then restore the file and Retry initialization. For direct-playback skip / finite failure-pass tests, set both `cacheVideosBeforePlayback` and `cacheVideosInBackground` to `false`, reload, and rename one or all files. Restore the desired caching settings afterward.
 
 Optional controller regression tests, if Node.js 18+ is already installed:
 
@@ -177,7 +189,7 @@ These use Node’s built-in test runner, a simulated media element, and an in-me
 ## Android Smart TV / kiosk browser
 
 1. Connect the TV to the internet and open the published URL in its browser. If the TV has no compatible web browser, separately install a compatible browser through an available device/app-store process.
-2. On the first visit, wait for the TV color-bar **Initializing stream…** screen to finish. On later visits, previously prepared clips should be reused. Press **Start playback** if prompted. Use directional keys to focus buttons and OK to select. Default audio is enabled; configure `startMuted: true` if you prefer muted startup.
+2. On the first visit, the TV color-bar **Initializing stream…** screen briefly counts down, then starts the first stream while preparation continues in the background. Full-preparation mode instead waits for every video. On later visits, cached clips should be reused. Press **Start playback** if prompted. Use directional keys to focus buttons and OK to select. Default audio is enabled; configure `startMuted: true` if you prefer muted startup.
 3. Select **Enter fullscreen** if supported. If not, try the browser’s own fullscreen setting or a compatible third-party kiosk browser.
 4. Observe at least two transitions and a full playlist loop. Leave playback running for **30–60 minutes**. Use diagnostics to record any failures and the filename/encoding involved.
 5. Record the TV make/model, Android/firmware version, browser name/version, tested URL, network, clip codecs/resolution, autoplay/fullscreen results, and duration of the run.
@@ -193,12 +205,12 @@ These use Node’s built-in test runner, a simulated media element, and an in-me
 | Black video or decode errors | Test a short, known-compatible 720p H.264 clip. Check pixel format, codec profile, resolution and bitrate; HEVC/AV1 in MP4 is not equivalent to H.264. Source footage may also contain black frames. |
 | Autoplay blocked | Focus Start playback with arrows and press OK/Enter. Inspect browser autoplay permissions, or set `startMuted: true` in `settings.js` and reload for broader autoplay compatibility. |
 | Fullscreen rejected or absent | Use a direct button press; check browser support, fullscreen permissions, and device/browser UI settings. Window-filling playback still works. |
-| Initialization cannot use storage | Open the HTTPS Pages URL or localhost. Plain HTTP LAN IPs and some private/TV browsers do not support Cache Storage. Use a compatible browser or explicitly choose Play without preparation. |
-| Not enough browser storage | Free device/site storage or use smaller clips, then Retry initialization. Browser quotas vary by device and are shared by sites on the same origin. |
+| Initialization cannot use storage | Open the HTTPS Pages URL or localhost. Plain HTTP LAN IPs and some private/TV browsers do not support Cache Storage. Background mode continues streaming; full-preparation mode offers Play without preparation. |
+| Not enough browser storage | Free device/site storage or use smaller clips, then Retry. Background errors do not stop streaming, and valid cached clips remain usable. Full-preparation mode waits for Retry initialization. Browser quotas vary by device and are shared by sites on the same origin. |
 | Initialization interrupted or stuck | Retry after restoring the connection. The app waits up to 60 seconds without transfer progress, retains completed clips, and never commits a partial file. |
 | Old video still plays after replacement | Increase `videoCacheVersion` in `settings.js`, publish it, and reload. A same-name, same-version video is deliberately reused from storage. |
 | Pages 404 / videos work only at `/` | Wait for deployment, verify `main` / root and `index.html`, use the repository subpath, check filename case, and remove leading `/` from asset paths. |
-| Buffering / 20-second playback timeout | If preparation is enabled, confirm diagnostics says Browser storage; a local clip can still stall due to codec, memory, or decoding limits. With direct playback, also check the network. Initialization has its own 60-second progress deadline. |
+| Buffering / 20-second playback timeout | Check whether diagnostics says Network stream or Browser storage. Streaming and background preparation share bandwidth; reduce video bitrate, or use full-preparation mode to avoid first-pass streaming. Local clips can still stall due to codec, memory, or decoding limits. Preparation has a separate 60-second progress deadline. |
 | Every clip fails | Supply the actual files, inspect diagnostics, fix paths/encoding, then Retry. The player deliberately stops automatic retries after the failed pass. |
 | Playlist edits do not appear | Wait for Pages deployment and reload the page. If necessary clear the browser cache. Retry alone does not reload configuration. |
 | Remote or TV browser incompatibility | Test desktop first, then record the TV/browser versions. Try a compatible current browser or kiosk browser; no universal Android TV compatibility is promised. |
@@ -215,7 +227,9 @@ Treat the repository and Pages URLs as public. Include only approved demo media 
 - [ ] Add at least two real MP4 clips; verify all app/media requests from an HTTP URL and a repository subpath.
 - [ ] Confirm there are no unexpected JavaScript console errors with valid clips.
 - [ ] Verify configured sound/fullscreen startup, a clear Start fallback, and manual Start with mouse and remote/Enter; test both values of each setting.
-- [ ] Confirm first-visit color bars, logo and initialization progress; playback waits for the complete playlist.
+- [ ] Confirm first-visit color bars, logo and countdown; even the first video streams after the startup interval without waiting for a completed file.
+- [ ] Confirm background progress and cached source selection on later transitions; cache completion does not restart the active clip.
+- [ ] Test full-preparation mode separately; it should wait for the complete playlist.
 - [ ] Reload with the same cache version; confirm videos are reused without video network requests.
 - [ ] Interrupt initialization, Retry, and confirm completed videos are retained; test unavailable/full storage recovery.
 - [ ] Replace an existing file, bump `videoCacheVersion`, and confirm refreshed content after reload.

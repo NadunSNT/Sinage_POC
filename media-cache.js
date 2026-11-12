@@ -133,7 +133,8 @@
       }
     }
 
-    async function prepare(playlist, onProgress) {
+    async function prepare(playlist, onProgress, preparationOptions) {
+      preparationOptions = preparationOptions || {};
       try {
         var cache = await openCache();
         var entries = [];
@@ -148,36 +149,57 @@
         for (var key of keys) {
           if (!seen.has(key.url)) await deadline(cache.delete(key));
         }
+        var completed = 0;
+        var deferred = [];
+        var errors = [];
         for (var position = 0; position < entries.length; position += 1) {
           var entry = entries[position];
           var report = function (loaded, totalBytes, phase) {
             if (onProgress) onProgress({
-              completed: position, total: entries.length, src: entry.src,
+              completed: completed, total: entries.length, src: entry.src,
               title: entry.title, loaded: loaded, totalBytes: totalBytes, phase: phase || "preparing"
             });
           };
           report(0, 0, "checking");
           var saved = await deadline(cache.match(entry.url));
           if (!complete(saved)) {
-            var response = await fetchComplete(entry.url, report);
-            // Store only after the full body is received and verified. A failed
-            // network request never leaves a seemingly usable partial cache entry.
-            report(Number(response.headers.get("Content-Length")), Number(response.headers.get("Content-Length")), "saving");
-            await deadline(cache.put(entry.url, response));
+            if (preparationOptions.shouldDefer && preparationOptions.shouldDefer(entry.src)) {
+              deferred.push(entry.src);
+              report(0, 0, "deferred");
+              continue;
+            }
+            try {
+              var response = await fetchComplete(entry.url, report);
+              // Store only after the full body is received and verified.
+              report(Number(response.headers.get("Content-Length")), Number(response.headers.get("Content-Length")), "saving");
+              await deadline(cache.put(entry.url, response));
+            } catch (error) {
+              if (!preparationOptions.continueOnError || error.name === "QuotaExceededError" || error.name === "SecurityError") throw error;
+              errors.push({ src: entry.src, message: friendlyError(error).message });
+              report(0, 0, "failed");
+              continue;
+            }
           }
-          if (onProgress) onProgress({ completed: position + 1, total: entries.length, src: entry.src, title: entry.title, loaded: 0, totalBytes: 0, phase: "ready" });
+          completed += 1;
+          if (onProgress) onProgress({ completed: completed, total: entries.length, src: entry.src, title: entry.title, loaded: 0, totalBytes: 0, phase: "ready" });
         }
+        return { completed: completed, total: entries.length, deferred: deferred, errors: errors };
       } catch (error) { throw friendlyError(error); }
     }
 
-    async function getSource(source) {
+    async function getSource(source, sourceOptions) {
+      sourceOptions = sourceOptions || {};
       try {
         var cache = await openCache();
         var response = await deadline(cache.match(resolveSource(source)));
-        if (!complete(response)) throw new Error("A prepared video is no longer available in browser storage. Retry initialization to restore it.");
+        if (!complete(response)) {
+          if (sourceOptions.allowMissing) return null;
+          throw new Error("A prepared video is no longer available in browser storage. Retry initialization to restore it.");
+        }
         var blob = await deadline(response.blob());
         if (!blob.size || blob.size !== Number(response.headers.get("Content-Length"))) {
           await deadline(cache.delete(resolveSource(source)));
+          if (sourceOptions.allowMissing) return null;
           throw new Error("A stored video is incomplete. Retry initialization to restore it.");
         }
         var objectUrl = URL.createObjectURL(blob);

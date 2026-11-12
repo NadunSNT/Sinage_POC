@@ -23,7 +23,9 @@
     showLogoAlways: typeof configuredSettings.showLogoAlways === "boolean" ? configuredSettings.showLogoAlways : true,
     showPlayerControlsButton: typeof configuredSettings.showPlayerControlsButton === "boolean" ? configuredSettings.showPlayerControlsButton : false,
     showAdNameAlways: typeof configuredSettings.showAdNameAlways === "boolean" ? configuredSettings.showAdNameAlways : false,
-    cacheVideosBeforePlayback: typeof configuredSettings.cacheVideosBeforePlayback === "boolean" ? configuredSettings.cacheVideosBeforePlayback : true,
+    cacheVideosBeforePlayback: typeof configuredSettings.cacheVideosBeforePlayback === "boolean" ? configuredSettings.cacheVideosBeforePlayback : false,
+    cacheVideosInBackground: typeof configuredSettings.cacheVideosInBackground === "boolean" ? configuredSettings.cacheVideosInBackground : true,
+    streamStartupDelaySeconds: typeof configuredSettings.streamStartupDelaySeconds === "number" && Number.isFinite(configuredSettings.streamStartupDelaySeconds) ? Math.max(0, Math.min(30, configuredSettings.streamStartupDelaySeconds)) : 3,
     videoCacheVersion: typeof configuredSettings.videoCacheVersion === "string" && configuredSettings.videoCacheVersion.trim() ? configuredSettings.videoCacheVersion.trim() : "1"
   };
   var playlist = [];
@@ -45,6 +47,16 @@
   var cacheReady = false;
   var cacheStatus = settings.cacheVideosBeforePlayback ? "Awaiting initialization" : "Network playback";
   var activeSource = null;
+  var backgroundCacheStatus = "";
+  var backgroundRunning = false;
+  var backgroundDisabled = false;
+  var backgroundComplete = false;
+  var deferredCacheSources = [];
+  var startupTimer = null;
+  var startupCountdown = null;
+  var streamedSources = new Set();
+
+  function backgroundMode() { return settings.cacheVideosInBackground && !settings.cacheVideosBeforePlayback; }
 
   // Fail visibly on malformed configuration instead of silently dropping entries.
   if (!Array.isArray(window.SIGNAGE_PLAYLIST)) {
@@ -77,7 +89,7 @@
     byId("diag-time").textContent = formatTime(video.currentTime) + " / " + formatTime(video.duration);
     byId("diag-ready").textContent = video.readyState + " / 4 · network " + video.networkState;
     byId("diag-sound").textContent = video.muted ? "Muted" : "Sound on";
-    byId("diag-cache").textContent = cacheStatus;
+    byId("diag-cache").textContent = cacheStatus + (backgroundCacheStatus ? " · " + backgroundCacheStatus : "");
     byId("diag-error").textContent = latestError || "None";
   }
 
@@ -105,7 +117,7 @@
     pauseButton.textContent = state === "paused" ? "Resume" : "Pause";
     startButton.hidden = initializationScreen || state === "preparing";
     startButton.disabled = !!configError || initializationScreen || state === "preparing";
-    nextButton.disabled = !!configError || (settings.cacheVideosBeforePlayback && !cacheReady);
+    nextButton.disabled = !!configError || state === "initializing" || (settings.cacheVideosBeforePlayback && !cacheReady);
     retryButton.disabled = !!configError || state === "initializing";
     if (state !== "playing") showControls();
     else scheduleHide();
@@ -168,6 +180,99 @@
     lastMediaTime = video.currentTime;
   }
 
+  function ensureMediaCache() {
+    if (!window.SignageMediaCache) throw new Error("Stream preparation is unavailable. Reload the page, or select Play without preparation.");
+    if (!mediaCache) mediaCache = window.SignageMediaCache.create({ baseUrl: document.baseURI, version: settings.videoCacheVersion });
+    return mediaCache;
+  }
+
+  function backgroundError(error) {
+    backgroundCacheStatus = "Background preparation paused";
+    latestError = "Background preparation: " + (error.message || String(error));
+    updateDiagnostics();
+  }
+
+  function prepareInBackground() {
+    if (!backgroundMode() || backgroundDisabled || backgroundRunning || backgroundComplete) return;
+    backgroundRunning = true;
+    deferredCacheSources = [];
+    backgroundCacheStatus = "Preparing local videos";
+    // Prioritize the upcoming clips. Do not deliberately issue a second full
+    // transfer for the clip currently streaming through the video element.
+    var ordered = playlist.slice(index + 1).concat(playlist.slice(0, index + 1));
+    try {
+      Promise.resolve(ensureMediaCache().prepare(ordered, function (progress) {
+        backgroundCacheStatus = "Background: " + progress.completed + " / " + progress.total + " ready";
+        updateDiagnostics(); // Never replace the active video or its status panel.
+      }, {
+        shouldDefer: function (src) { return activeSource && activeSource.network && current().src === src && !streamedSources.has(src); },
+        continueOnError: true
+      })).then(function (result) {
+        backgroundRunning = false;
+        result = result || { completed: ordered.length, total: ordered.length, deferred: [], errors: [] };
+        deferredCacheSources = result.deferred || [];
+        backgroundComplete = result.completed === result.total;
+        backgroundCacheStatus = "Background: " + result.completed + " / " + result.total + " ready";
+        if (result.errors && result.errors.length) {
+          latestError = "Background preparation: " + result.errors[0].message;
+          backgroundCacheStatus += " · retry available";
+        }
+        updateDiagnostics();
+        // A clip may have changed while the queue was busy. Resume once if a
+        // deferred file is now free, without looping on a still-active stream.
+        if (deferredCacheSources.some(function (src) { return !activeSource || !activeSource.network || current().src !== src; })) prepareInBackground();
+      }).catch(function (error) {
+        backgroundRunning = false;
+        backgroundDisabled = true; // Explicit Retry can resume; no tight error loop.
+        backgroundError(error);
+      });
+    } catch (error) {
+      backgroundRunning = false;
+      backgroundDisabled = true;
+      backgroundError(error);
+    }
+  }
+
+  function initializeStreaming() {
+    generation += 1;
+    var startupGeneration = generation;
+    setState("initializing", "Initializing stream…", "Connecting your stream. Local videos will be prepared while playback continues.");
+    video.pause();
+    byId("cache-progress").value = 0;
+    byId("cache-progress").setAttribute("value", "0");
+    var startedAt = Date.now();
+    var delayMs = settings.streamStartupDelaySeconds * 1000;
+    function countdown() {
+      var elapsed = Date.now() - startedAt;
+      var percent = delayMs ? Math.min(100, Math.floor(elapsed / delayMs * 100)) : 100;
+      byId("cache-progress").value = percent;
+      byId("cache-progress").setAttribute("value", String(percent));
+      byId("cache-progress-label").textContent = "Starting playback in " + Math.max(0, Math.ceil((delayMs - elapsed) / 1000)) + " seconds";
+    }
+    function begin(source) {
+      clearTimeout(startupTimer);
+      clearInterval(startupCountdown);
+      if (generation !== startupGeneration) { if (source && source.release) source.release(); return; }
+      loadItem(index, false, source || { url: current().src, network: true });
+    }
+    countdown();
+    startupCountdown = setInterval(countdown, 250);
+    startupTimer = setTimeout(function () { begin(null); }, delayMs);
+    // A warm visit can use the first cached file immediately. Slow/unavailable
+    // storage never extends the startup interval; late Blob URLs are released.
+    try {
+      ensureMediaCache().getSource(current().src, { allowMissing: true }).then(function (source) {
+        if (source) begin(source);
+      }).catch(function (error) {
+        backgroundDisabled = true;
+        backgroundError(error);
+      });
+    } catch (error) {
+      backgroundDisabled = true;
+      backgroundError(error);
+    }
+  }
+
   function displayInitializationProgress(progress) {
     var fraction = progress.totalBytes > 0 ? Math.min(progress.loaded / progress.totalBytes, .99) : 0;
     var percent = progress.total ? Math.floor((progress.completed + fraction) / progress.total * 100) : 0;
@@ -208,9 +313,7 @@
     cacheStatus = "Checking browser storage";
     updateDiagnostics();
     try {
-      if (!window.SignageMediaCache) throw new Error("Stream preparation is unavailable. Reload the page, or select Play without preparation.");
-      if (!mediaCache) mediaCache = window.SignageMediaCache.create({ baseUrl: document.baseURI, version: settings.videoCacheVersion });
-      Promise.resolve(mediaCache.prepare(playlist, function (progress) {
+      Promise.resolve(ensureMediaCache().prepare(playlist, function (progress) {
         if (generation === initializationGeneration) displayInitializationProgress(progress);
       })).then(function () {
         if (generation !== initializationGeneration) return;
@@ -228,18 +331,21 @@
     video.pause();
     video.src = source.url;
     activeSource = source;
+    if (backgroundMode()) cacheStatus = source.network ? "Network stream" : "Browser storage";
     video.load();
     // Release only after detaching the old source; retain one Blob URL at a time.
     if (previousSource && previousSource.release) previousSource.release();
     setState("loading", "Getting ready.", "Loading “" + current().title + "”. Playback starts " + (video.muted ? "muted." : "with sound."));
     resetProgress();
     attemptPlay();
+    prepareInBackground();
   }
 
-  function loadItem(position, manual) {
+  function loadItem(position, manual, sourceOverride) {
     clearTimeout(skipTimer);
     skipTimer = null;
     if (configError) return;
+    if (state === "initializing" && backgroundMode() && !sourceOverride) return;
     if (settings.cacheVideosBeforePlayback && !cacheReady) return;
     if (manual) failed.clear();
     generation += 1;
@@ -252,15 +358,50 @@
     byId("persistent-ad-name").textContent = current().title;
     byId("track-position").textContent = String(index + 1).padStart(2, "0") + " / " + String(playlist.length).padStart(2, "0");
     updateProgress();
-    if (settings.cacheVideosBeforePlayback) {
+    if (sourceOverride) {
+      attachSource(sourceOverride);
+    } else if (settings.cacheVideosBeforePlayback) {
       mediaCache.getSource(current().src).then(function (source) {
         if (sourceGeneration !== generation) { source.release(); return; }
         attachSource(source);
       }).catch(function (error) {
         if (sourceGeneration === generation) initializationFailed(error);
       });
+    } else if (backgroundMode()) {
+      var decided = false;
+      function useNetwork() {
+        if (decided) return;
+        decided = true;
+        if (sourceGeneration !== generation) return;
+        backgroundComplete = false;
+        attachSource({ url: current().src, network: true });
+      }
+      // A slow local cache read must not hold up an ordinary video transition.
+      var lookupTimer = setTimeout(useNetwork, 1500);
+      try {
+        ensureMediaCache().getSource(current().src, { allowMissing: true }).then(function (source) {
+          if (decided || sourceGeneration !== generation) {
+            clearTimeout(lookupTimer);
+            if (source && source.release) source.release();
+            return;
+          }
+          if (!source) { clearTimeout(lookupTimer); useNetwork(); return; }
+          decided = true;
+          clearTimeout(lookupTimer);
+          attachSource(source);
+        }).catch(function (error) {
+          clearTimeout(lookupTimer);
+          if (sourceGeneration !== generation) return;
+          backgroundError(error);
+          useNetwork();
+        });
+      } catch (error) {
+        clearTimeout(lookupTimer);
+        backgroundError(error);
+        useNetwork();
+      }
     } else {
-      attachSource({ url: current().src });
+      attachSource({ url: current().src, network: true });
     }
   }
 
@@ -344,7 +485,10 @@
     scheduleHide();
   });
   video.addEventListener("ended", function () {
-    if (isActive()) loadItem(index + 1, false);
+    if (isActive()) {
+      if (activeSource && activeSource.network) streamedSources.add(current().src);
+      loadItem(index + 1, false);
+    }
   });
   video.addEventListener("error", function () {
     if (state === "initializing" || state === "cache-error" || state === "preparing") return;
@@ -387,6 +531,7 @@
   startButton.addEventListener("click", startPlayback);
   nextButton.addEventListener("click", function () { loadItem(index + 1, true); });
   retryButton.addEventListener("click", function () {
+    if (backgroundMode()) { backgroundDisabled = false; backgroundComplete = false; }
     if (settings.cacheVideosBeforePlayback && !cacheReady) initializePlaylist();
     else loadItem(index, true);
   });
@@ -394,6 +539,7 @@
   byId("stream-without-cache").addEventListener("click", function () {
     if (state !== "cache-error") return;
     settings.cacheVideosBeforePlayback = false;
+    settings.cacheVideosInBackground = false;
     cacheStatus = "Network playback · preparation skipped";
     loadItem(index, true);
     requestStartupFullscreen();
@@ -557,6 +703,7 @@
   } else {
     startButton.focus();
     if (settings.cacheVideosBeforePlayback) initializePlaylist();
+    else if (backgroundMode()) initializeStreaming();
     else loadItem(0, false);
     requestStartupFullscreen();
   }
